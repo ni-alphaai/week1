@@ -1,0 +1,162 @@
+import type { Instruction, Lesson } from '../../types'
+
+type Dir = 'right' | 'up' | 'left' | 'down'
+const cap = (dir: Dir) => `${dir[0].toUpperCase()}${dir.slice(1)}`
+const repeat = (count: number, body: Dir[]): Instruction => ({
+  kind: 'loop',
+  count,
+  body,
+  label: `Repeat ${count}× → ${body.map(cap).join(', ')}`,
+})
+
+export const lesson3: Lesson = {
+  id: 'lesson-2-for-loops',
+  version: 4,
+  title: 'For Loops',
+  subtitle: 'Drag moves into a Repeat block and pick the right count.',
+  sequence: 2,
+  skillIds: ['loops', 'sequencing'],
+  steps: [
+    {
+      id: 'l3-intro',
+      type: 'concept',
+      title: 'Repeat on purpose',
+      body: 'A **for-loop** runs a block of moves an exact number of times.\n\nDrag a **Repeat** block into your program, then drag move cards **inside** it. Use the **− / +** buttons to set how many times it repeats.\n\nFrom now on you only get a **few plain move cards** — far too few to walk the whole way. The Repeat block is how one card does the work of many. Choose the **right count**: too few and you stop short, too many and you crash.',
+    },
+    {
+      id: 'l3-q1',
+      type: 'sequence',
+      goal: 'Pick the exact count',
+      prompt: 'The treasure is down a long row, and you have only one Right card. Land on it exactly — not short, not past it.',
+      map: { rows: 1, cols: 6, start: { row: 0, col: 0 }, goal: { row: 0, col: 5 } },
+      availableCommands: ['right'],
+      blocks: ['loop'],
+      loopRange: { min: 1, max: 8 },
+      cardLimits: { right: 1, loop: 1 },
+      successRule: 'reachGoal',
+      solution: [repeat(5, ['right'])],
+      feedback: {
+        correct: 'Exactly five — one card, repeated, did the whole walk.',
+        hints: [
+          'Count the tiles from start to treasure.',
+          'One Right card inside a Repeat block, set to the tile count.',
+        ],
+      },
+    },
+    {
+      id: 'l3-q2',
+      type: 'sequence',
+      goal: 'Two loops, two legs',
+      prompt: 'Cross the floor and climb to the treasure — but you only get one Right and one Up card.',
+      map: { rows: 4, cols: 5, start: { row: 3, col: 0 }, goal: { row: 0, col: 4 } },
+      availableCommands: ['right', 'up'],
+      blocks: ['loop'],
+      loopRange: { min: 1, max: 8 },
+      cardLimits: { right: 1, up: 1 },
+      successRule: 'reachGoal',
+      solution: [repeat(4, ['right']), repeat(3, ['up'])],
+      feedback: {
+        correct: 'A Repeat for the row and a Repeat for the climb — nicely split.',
+        hints: [
+          'How many columns across is the treasure? That is your first loop count.',
+          'Add a second Repeat block for the climb up.',
+        ],
+      },
+    },
+    {
+      id: 'l3-q3',
+      type: 'sequence',
+      goal: 'Loop a staircase',
+      prompt: 'A staircase zig-zags up to the treasure. You have one Up and one Right card — find the repeating step and let it climb.',
+      map: { rows: 5, cols: 5, start: { row: 4, col: 0 }, goal: { row: 0, col: 4 } },
+      availableCommands: ['up', 'right'],
+      blocks: ['loop'],
+      loopRange: { min: 1, max: 8 },
+      cardLimits: { up: 1, right: 1, loop: 1 },
+      successRule: 'reachGoal',
+      solution: [repeat(4, ['up', 'right'])],
+      feedback: {
+        correct: 'A four-step staircase in a single loop — elegant.',
+        hints: [
+          'Trace the path: up one, right one, again and again.',
+          'Put "Up" then "Right" inside one Repeat block.',
+        ],
+      },
+    },
+    {
+      id: 'l3-debug',
+      type: 'sequence',
+      goal: 'Debug: fix the count',
+      prompt: 'This program was meant to walk to the treasure, but it crashes off the edge! The move is right — the Repeat count is wrong. Read the code, then fix the count so the explorer stops exactly on the treasure.',
+      map: { rows: 1, cols: 7, start: { row: 0, col: 0 }, goal: { row: 0, col: 6 } },
+      availableCommands: ['right'],
+      blocks: ['loop'],
+      loopRange: { min: 1, max: 9 },
+      cardLimits: { right: 1, loop: 1 },
+      successRule: 'reachGoal',
+      editableInitial: true,
+      initialProgram: [repeat(8, ['right'])],
+      solution: [repeat(6, ['right'])],
+      feedback: {
+        correct: 'Six, not eight — reading the count and fixing it is real debugging.',
+        hints: [
+          'Count the tiles from start to treasure: how many Right steps is that?',
+          'Tap the − button on the Repeat block until the count is right.',
+        ],
+      },
+    },
+    {
+      id: 'l3-q4',
+      type: 'sequence',
+      goal: 'Loop through the teleport',
+      prompt: 'Stepping on the swirl whisks you to its twin. With a single Right card, reach the treasure — and mind where the jump drops you.',
+      map: {
+        rows: 3,
+        cols: 5,
+        start: { row: 2, col: 0 },
+        goal: { row: 0, col: 4 },
+        teleports: [{ a: { row: 2, col: 2 }, b: { row: 0, col: 0 } }],
+      },
+      availableCommands: ['right'],
+      blocks: ['loop'],
+      loopRange: { min: 1, max: 8 },
+      cardLimits: { right: 1, loop: 1 },
+      successRule: 'reachGoal',
+      solution: [repeat(6, ['right'])],
+      feedback: {
+        correct: 'The loop walked you onto the swirl and kept going on the other side — six in all.',
+        hints: [
+          'The swirl on the bottom row jumps you to the top-left corner.',
+          'Count every step: the tiles before the swirl plus the tiles after it.',
+        ],
+      },
+    },
+    {
+      id: 'l3-q5',
+      type: 'sequence',
+      goal: 'Loop the whole haul',
+      prompt: 'Fetch the gem, carry it up to its flag, drop it there, then head home — with just one card per direction.',
+      map: {
+        rows: 5,
+        cols: 5,
+        start: { row: 4, col: 0 },
+        goal: { row: 0, col: 0 },
+        tasks: [{ from: { row: 4, col: 4 }, to: { row: 0, col: 4 }, label: 'the gem' }],
+      },
+      availableCommands: ['right', 'up', 'left'],
+      availableActions: ['pickup', 'drop'],
+      blocks: ['loop'],
+      loopRange: { min: 1, max: 8 },
+      cardLimits: { right: 1, up: 1, left: 1 },
+      successRule: 'reachGoal',
+      solution: [repeat(4, ['right']), 'pickup', repeat(4, ['up']), 'drop', repeat(4, ['left'])],
+      feedback: {
+        correct: 'Three loops and a cargo run — you have the for-loop mastered.',
+        hints: [
+          'The trip has three straight legs — work out how long each one is.',
+          'Make each leg its own Repeat, with a Pick up and a Drop slotted in at the right spots.',
+        ],
+      },
+    },
+  ],
+}
