@@ -239,7 +239,7 @@ function HomeDashboard() {
           <button
             type="button"
             onClick={() => void signOutParent()}
-            className="w-full py-2 text-sm text-soft hover:text-muted"
+            className="w-full cursor-pointer py-2 text-sm text-soft hover:text-muted"
           >
             Sign out{user?.email ? ` (${user.email})` : ''}
           </button>

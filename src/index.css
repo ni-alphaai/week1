@@ -1734,7 +1734,21 @@ body {
 }
 
 .cmd-drop-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 999px;
   background: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent-soft);
+  pointer-events: none;
+  z-index: 3;
+}
+.cmd-drop-line--before {
+  top: -0.3rem;
+}
+.cmd-drop-line--after {
+  bottom: -0.3rem;
 }
 
 /* Nested block editor */

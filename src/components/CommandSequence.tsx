@@ -43,6 +43,19 @@ const ACTION_LABEL: Record<Action, string> = {
 }
 const DRAG_THRESHOLD_PX = 6
 
+function DragHandle({ locked = false }: { locked?: boolean }) {
+  return (
+    <span
+      className={`cmd-handle flex h-7 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold ${
+        locked ? 'cursor-not-allowed opacity-50' : ''
+      }`}
+      aria-hidden="true"
+    >
+      {locked ? '⊟' : '⠿'}
+    </span>
+  )
+}
+
 type Slot = 'body' | 'then' | 'else'
 interface Seg {
   id: string
@@ -138,16 +151,21 @@ function deleteNode(root: ProgramNode[], id: string): ProgramNode[] {
   return next
 }
 
-// `targetIndex` is expressed in coordinates of the list *after* the dragged
-// node has been removed (computeTarget skips the dragged node), so no extra
-// adjustment is needed once we splice it out below.
+// `targetIndex` is a full-list slot (computeTarget measures every card, dragged
+// node included). When the node is moving within the same list and currently
+// sits before the target slot, removing it shifts everything after it up by one,
+// so the post-removal insertion point is one less.
 function moveNode(root: ProgramNode[], id: string, targetPath: NodePath, targetIndex: number): ProgramNode[] {
   const next = cloneTree(root)
+  const targetListBefore = getListAt(next, targetPath)
+  const origIndex = targetListBefore ? targetListBefore.findIndex((n) => n.id === id) : -1
   const node = spliceById(next, id)
   if (!node) return root
   const list = getListAt(next, targetPath)
   if (!list) return root
-  list.splice(Math.max(0, Math.min(targetIndex, list.length)), 0, node)
+  let index = targetIndex
+  if (origIndex !== -1 && origIndex < targetIndex) index -= 1
+  list.splice(Math.max(0, Math.min(index, list.length)), 0, node)
   return next
 }
 
@@ -332,23 +350,20 @@ export function CommandSequence({
     [loopRange.min, loopRange.max, predicateOptions],
   )
 
-  const insertIndexInZone = useCallback((path: NodePath, clientY: number, skipId?: string): number => {
+  // Returns a slot index in *full-list* coordinates (0..list.length): the gap
+  // before list[i], or list.length for the very end. The dragged card stays in
+  // the layout (dimmed), so it's measured like any other; moveNode compensates
+  // for its removal. Keeping one coordinate system lets the drop indicator and
+  // the actual drop agree, including the final end-of-list slot.
+  const insertIndexInZone = useCallback((path: NodePath, clientY: number): number => {
     const list = getListAt(programRef.current, path) ?? []
-    let index = 0
     for (let i = 0; i < list.length; i++) {
-      // The card being dragged still occupies layout; ignore it so the drop
-      // index reflects where the card will actually land.
-      if (list[i].id === skipId) continue
       const el = nodeRefs.current.get(list[i].id)
-      if (!el) {
-        index += 1
-        continue
-      }
+      if (!el) continue
       const rect = el.getBoundingClientRect()
-      if (clientY < rect.top + rect.height / 2) return index
-      index += 1
+      if (clientY < rect.top + rect.height / 2) return i
     }
-    return index
+    return list.length
   }, [])
 
   const computeTarget = useCallback(
@@ -360,7 +375,6 @@ export function CommandSequence({
           return 'remove'
         }
       }
-      const skipId = session.kind === 'tree' ? session.nodeId : undefined
       let best: { path: NodePath; depth: number } | null = null
       for (const { el, path } of zoneRefs.current.values()) {
         if (session.kind === 'tree' && path.some((seg) => seg.id === session.nodeId)) continue
@@ -370,7 +384,7 @@ export function CommandSequence({
         }
       }
       if (!best) return null
-      return { path: best.path, index: insertIndexInZone(best.path, clientY, skipId) }
+      return { path: best.path, index: insertIndexInZone(best.path, clientY) }
     },
     [insertIndexInZone],
   )
@@ -502,13 +516,10 @@ export function CommandSequence({
 
   // ---- rendering ----
 
-  function renderDropLine() {
-    return <div className="cmd-drop-line h-1 rounded-full shadow-sm" aria-hidden="true" />
-  }
-
   function renderZone(path: NodePath, nodes: ProgramNode[], slotLabel: string | null, emptyHint: string) {
     const key = pathKey(path)
     const active = dropTarget && dropTarget !== 'remove' && pathKey(dropTarget.path) === key
+    const dropIndex = active ? (dropTarget as { index: number }).index : -1
     return (
       <div
         ref={(el) => registerZone(key, el ? { el, path } : null)}
@@ -519,12 +530,18 @@ export function CommandSequence({
           <span className="block-zone__empty">{active ? 'Drop here' : emptyHint}</span>
         )}
         {nodes.map((node, index) => (
+          // Drop lines are absolute overlays (not in flow) so showing one never
+          // shifts cards mid-drag — that layout shift used to make the final
+          // "end of list" slot impossible to land on. The last card hosts the
+          // trailing drop line so appending needs no extra spacer element.
           <div key={node.id} className="relative">
-            {active && (dropTarget as { index: number }).index === index && renderDropLine()}
+            {dropIndex === index && <div className="cmd-drop-line cmd-drop-line--before" aria-hidden="true" />}
             {renderBlock(node, path)}
+            {index === nodes.length - 1 && dropIndex === nodes.length && (
+              <div className="cmd-drop-line cmd-drop-line--after" aria-hidden="true" />
+            )}
           </div>
         ))}
-        {active && (dropTarget as { index: number }).index === nodes.length && nodes.length > 0 && renderDropLine()}
       </div>
     )
   }
@@ -548,19 +565,6 @@ export function CommandSequence({
           </option>
         ))}
       </select>
-    )
-  }
-
-  function DragHandle({ locked = false }: { locked?: boolean }) {
-    return (
-      <span
-        className={`cmd-handle flex h-7 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold ${
-          locked ? 'cursor-not-allowed opacity-50' : ''
-        }`}
-        aria-hidden="true"
-      >
-        {locked ? '⊟' : '⠿'}
-      </span>
     )
   }
 
