@@ -44,6 +44,8 @@ interface MapGridProps {
   isDeparting?: boolean
   /** Live binary-search window; number tiles outside it dim out as discarded. */
   searchWindow?: SearchWindow | null
+  /** True when a loop is spinning without progress — shows a "stuck" spinner. */
+  loopStuck?: boolean
 }
 
 const TOKEN_TILE_RATIO = 0.58
@@ -60,19 +62,35 @@ function Explorer({
   solved,
   facing,
   carrying,
+  loopStuck = false,
 }: {
   crashed: boolean
   solved: boolean
   facing: Command
   carrying: boolean
+  loopStuck?: boolean
 }) {
   const shift = EYE_SHIFT[facing]
-  const tone = crashed ? 'explorer-token--crashed' : solved ? 'explorer-token--solved' : ''
+  // "Stuck" only shows when the explorer is genuinely spinning — never over a
+  // solved or crashed token, where those states own the visual.
+  const stuck = loopStuck && !solved && !crashed
+  const tone = crashed
+    ? 'explorer-token--crashed'
+    : solved
+      ? 'explorer-token--solved'
+      : stuck
+        ? 'explorer-token--stuck'
+        : ''
   return (
     <div className="relative h-full w-full">
       {carrying && !crashed && (
         <span className="explorer-carry" aria-label="Carrying an item">
           <GemIcon className="h-full w-full text-[var(--color-task)]" />
+        </span>
+      )}
+      {stuck && (
+        <span className="explorer-stuck-ring" aria-label="Stuck in a loop" role="img">
+          <span className="explorer-stuck-ring__spinner" aria-hidden="true" />
         </span>
       )}
       <div className={`explorer-token absolute inset-0 rounded-full ${tone}`}>
@@ -112,6 +130,7 @@ export function MapGrid({
   isTeleporting = false,
   isDeparting = false,
   searchWindow = null,
+  loopStuck = false,
 }: MapGridProps) {
   const checkpoints = map.checkpoints ?? []
   const tasks = map.tasks ?? []
@@ -394,7 +413,13 @@ export function MapGrid({
             } ${explorerMotion}`}
             style={{ left: `${leftPct}%`, top: `${topPct}%`, width: tokenWidth, height: tokenHeight }}
           >
-            <Explorer crashed={crashed} solved={solved} facing={facing} carrying={carrying} />
+            <Explorer
+              crashed={crashed}
+              solved={solved}
+              facing={facing}
+              carrying={carrying}
+              loopStuck={loopStuck}
+            />
           </div>
         </div>
       </div>

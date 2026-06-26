@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { Action, Command, ConditionalStep, Instruction, Position, SequenceStep } from '../types'
-import { getLesson, getNextLessonId } from '../content/registry'
+import { getLesson, getNextLessonId, registerGeneratedPuzzle } from '../content/registry'
 import { useLearner } from '../context/LearnerContext'
 import { checkProgram } from '../engine/checker'
 import type { ProgramSpec } from '../engine/checker'
@@ -12,13 +12,16 @@ import { aiExplainEnabled, aiGenerationEnabled } from '../ai/config'
 import { getExplanation } from '../ai/explain'
 import { ensurePrefetchDepth, PREFETCH_QUEUE_DEPTH } from '../ai/practicePrefetch'
 import { generatePuzzle } from '../ai/generation'
-import { conceptForLesson, buildPracticeTemplate } from '../content/generated'
+import type { GeneratedPuzzle } from '../ai/generation'
+import { conceptForLesson, buildPracticeTemplate, smallerVariantTemplate, toPracticeStep } from '../content/generated'
+import { encodePuzzle } from '../content/shareCode'
 import { nextDifficultyDirection } from '../adaptivity/difficulty'
 import { lessonSuccessRate } from '../adaptivity/mastery'
 import { MapGrid } from '../components/MapGrid'
 import { CommandSequence } from '../components/CommandSequence'
 import type { ProgramNode, PaletteItem } from '../components/CommandSequence'
-import { nodeToInstruction, instructionToNode } from '../components/programNodes'
+import { nodeToInstruction, instructionToNode, iterationMap } from '../components/programNodes'
+import { BadgeToast } from '../components/BadgeToast'
 import { BirdGuide, type BirdMood } from '../components/BirdGuide'
 import { FormattedText } from '../components/FormattedText'
 import { Confetti } from '../components/Confetti'
@@ -93,8 +96,17 @@ function specForStep(step: PlayStep): ProgramSpec {
 export function LessonPage() {
   const { lessonId } = useParams()
   const navigate = useNavigate()
-  const { ready, activeLearner, state, ensureLesson, saveProgram, setCurrentStep, completeConcept, recordResult } =
-    useLearner()
+  const {
+    ready,
+    activeLearner,
+    state,
+    ensureLesson,
+    saveProgram,
+    setCurrentStep,
+    completeConcept,
+    recordResult,
+    recordPracticeResult,
+  } = useLearner()
 
   const lesson = useMemo(() => (lessonId ? getLesson(lessonId) : undefined), [lessonId])
 
@@ -135,6 +147,22 @@ export function LessonPage() {
   const [lastAttempt, setLastAttempt] = useState<{ run: RunResult; instructions: Instruction[] } | null>(null)
   const [explainText, setExplainText] = useState<string | null>(null)
   const [explainLoading, setExplainLoading] = useState(false)
+  // #8 loop-stuck + iteration UI: per-run loop iteration counts and stuck flag.
+  const [iterations, setIterations] = useState<Map<string, number> | null>(null)
+  const [loopStuck, setLoopStuck] = useState(false)
+  // #10 share-this-puzzle: transient "copied" acknowledgement.
+  const [shareCopied, setShareCopied] = useState(false)
+  // #4 "Try a smaller version": the active easier variant (null = main puzzle),
+  // a loading flag, and a transient fallback notice.
+  const [variantStep, setVariantStep] = useState<SequenceStep | null>(null)
+  const [variantLoading, setVariantLoading] = useState(false)
+  const [variantNotice, setVariantNotice] = useState<string | null>(null)
+
+  // Elapsed-time anchor for the current step, reset on every step change so a
+  // correct run can report how long the learner took (#11 solveMs).
+  const stepStartRef = useRef(Date.now())
+  // Single-flight cache of the prefetched smaller variant for the current step.
+  const smallerRef = useRef<Promise<GeneratedPuzzle | null> | null>(null)
 
   const timers = useRef<number[]>([])
   const feedbackRef = useRef<HTMLDivElement>(null)
@@ -182,6 +210,14 @@ export function LessonPage() {
     setIsDeparting(false)
     setCounter(undefined)
     setSearchWindow(null)
+    setIterations(null)
+    setLoopStuck(false)
+    setShareCopied(false)
+    setVariantStep(null)
+    setVariantLoading(false)
+    setVariantNotice(null)
+    smallerRef.current = null
+    stepStartRef.current = Date.now()
     if (lesson && currentStep && (currentStep.type === 'sequence' || currentStep.type === 'conditional')) {
       const saved = stateRef.current?.lessonProgress[lesson.id]?.savedPrograms[currentStep.id]
       const restored = restoreProgram(saved)
@@ -223,6 +259,30 @@ export function LessonPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lesson, stepIndex])
 
+  // #4: as soon as the learner has exhausted the text hints on a play step (the
+  // same gate as the ghost demo), warm up one easier AI variant in the
+  // background so the "Try a smaller version" button is instant. Single-flight
+  // via smallerRef, which the step-change effect clears so each step gets a
+  // fresh variant. Mirrors the canShowGhost gate using raw state since the
+  // derived consts are computed after the early return below.
+  useEffect(() => {
+    if (!lesson || !aiGenerationEnabled) return
+    if (conceptForLesson(lesson) === null) return
+    if (smallerRef.current) return
+    const step = lesson.steps[stepIndex]
+    if (!step || (step.type !== 'sequence' && step.type !== 'conditional')) return
+    const hintTotal = step.feedback.hints.length
+    const priorIncorrect = stateRef.current?.stepStats[step.id]?.incorrect ?? 0
+    const auto = feedback?.status === 'incorrect' ? priorIncorrect : 0
+    const level = Math.max(manualHintLevel, auto)
+    if (level < hintTotal) return // hints not yet exhausted
+    const template = smallerVariantTemplate(lesson)
+    if (!template) return
+    smallerRef.current = generatePuzzle(template)
+    // stateRef is read fresh; only the hint-affecting inputs need to retrigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lesson, stepIndex, manualHintLevel, feedback])
+
   if (!lesson) {
     return (
       <div className="mx-auto max-w-md p-6 text-center">
@@ -251,6 +311,10 @@ export function LessonPage() {
   const canAskHint = isPlayStep && hintLevel < hintCount
   // Once the text hints are exhausted, Rico can demonstrate the solution.
   const canShowGhost = !!isPlayStep && !canAskHint
+  // #4: an AI-generated easier variant is offered alongside the ghost when the
+  // lesson maps to a generator concept and generation is enabled.
+  const canTrySmaller =
+    canShowGhost && aiGenerationEnabled && !!lesson && conceptForLesson(lesson) !== null
 
   function persistProgram(next: ProgramNode[]) {
     if (!lesson || !currentStep || (currentStep.type !== 'sequence' && currentStep.type !== 'conditional')) return
@@ -281,6 +345,9 @@ export function LessonPage() {
     setLastAttempt(null)
     setExplainText(null)
     setExplainLoading(false)
+    setIterations(null)
+    setLoopStuck(false)
+    setShareCopied(false)
   }
 
   function handleProgramChange(next: ProgramNode[]) {
@@ -363,6 +430,67 @@ export function LessonPage() {
     }
     if (feedbackRef.current) {
       feedbackRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }
+
+  // #10: copy a self-contained share link for the current puzzle. The payload
+  // mirrors ShareablePuzzle; the /share route decodes + re-verifies it.
+  async function handleShare() {
+    if (!currentStep || (currentStep.type !== 'sequence' && currentStep.type !== 'conditional')) return
+    const step = currentStep
+    const code = encodePuzzle({
+      map: step.map,
+      availableCommands: step.availableCommands,
+      availableActions: step.availableActions,
+      blocks: step.blocks,
+      predicateOptions: step.predicateOptions,
+      loopRange: step.loopRange,
+      cardLimits: step.cardLimits,
+      solution: step.solution,
+      goal: step.goal,
+      prompt: step.prompt,
+      feedback: step.feedback,
+    })
+    playSound('click')
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/share/${code}`)
+      setShareCopied(true)
+      const reset = window.setTimeout(() => setShareCopied(false), 1800)
+      timers.current.push(reset)
+    } catch {
+      /* clipboard may be unavailable; fail quietly */
+    }
+  }
+
+  // #4: enter "smaller variant" mode using the prefetched (or freshly generated)
+  // easier puzzle. On failure/abstain, surface a brief notice and fall back to
+  // the ghost demo so the learner is never blocked.
+  async function handleTrySmaller() {
+    if (!lesson || variantLoading) return
+    playSound('click')
+    setVariantLoading(true)
+    try {
+      let pending = smallerRef.current
+      if (!pending) {
+        const template = smallerVariantTemplate(lesson)
+        pending = template ? generatePuzzle(template) : Promise.resolve(null)
+        smallerRef.current = pending
+      }
+      const puzzle = await pending
+      if (puzzle) {
+        const step = toPracticeStep(puzzle, lesson)
+        registerGeneratedPuzzle(step.id, puzzle)
+        setVariantStep(step)
+        setVariantNotice(null)
+      } else {
+        smallerRef.current = null
+        setVariantNotice('No smaller version right now — watch Rico instead.')
+        const clear = window.setTimeout(() => setVariantNotice(null), 2600)
+        timers.current.push(clear)
+        handleShowGhost()
+      }
+    } finally {
+      setVariantLoading(false)
     }
   }
 
@@ -461,6 +589,8 @@ export function LessonPage() {
           const clearCelebrate = window.setTimeout(() => setCelebrate(false), 2000)
           timers.current.push(clearCelebrate)
         }
+        setIterations(iterationMap(program, result.run))
+        setLoopStuck(result.run.status === 'loopStuck')
         playSound(result.correct ? 'success' : 'error')
         if (result.correct) {
           setFeedback({ status: 'correct', message: result.message })
@@ -469,7 +599,17 @@ export function LessonPage() {
           setFeedback({ status: 'incorrect', message: result.message })
           setLastAttempt({ run: result.run, instructions })
         }
-        recordResult(lesson, step.id, result.correct, result.run.executed)
+        // #11: enrich the result with the program, an optimal-solve flag (a
+        // correct shortestPath sequence is optimal by construction), and how
+        // long the step took, so badge rules can react.
+        const optimalSolved =
+          result.correct && step.type === 'sequence' && step.successRule === 'shortestPath'
+        const solveMs = result.correct ? Date.now() - stepStartRef.current : 0
+        recordResult(lesson, step.id, result.correct, result.run.executed, {
+          program: instructions,
+          optimalSolved,
+          solveMs,
+        })
         if (feedbackRef.current) {
           feedbackRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
         }
@@ -503,6 +643,7 @@ export function LessonPage() {
     const earnedBadge = lesson.award && (state?.badges?.includes(lesson.award.id) ?? false)
     return (
       <div className="animate-float-in mx-auto max-w-md px-4 py-10">
+        <BadgeToast />
         <Confetti count={earnedBadge ? 70 : 36} />
         <div className="card-elevated p-8 text-center">
           {earnedBadge && lesson.award ? (
@@ -571,6 +712,7 @@ export function LessonPage() {
 
   return (
     <div className="lesson-shell mx-auto px-4 pb-20 pt-6 lg:pb-8">
+      <BadgeToast />
       {celebrate && (
         <>
           <Confetti count={48} />
@@ -621,7 +763,21 @@ export function LessonPage() {
         </section>
       )}
 
-      {isPlayStep && currentStep && (currentStep.type === 'sequence' || currentStep.type === 'conditional') && (
+      {isPlayStep && currentStep && (currentStep.type === 'sequence' || currentStep.type === 'conditional') && variantStep && (
+        <VariantPlayer
+          step={variantStep}
+          lessonTitle={lesson.title}
+          onExit={() => {
+            playSound('click')
+            setVariantStep(null)
+          }}
+          onSolved={(instr) =>
+            recordPracticeResult(lesson, variantStep.id, true, { program: instr, solveMs: 0 })
+          }
+        />
+      )}
+
+      {isPlayStep && currentStep && (currentStep.type === 'sequence' || currentStep.type === 'conditional') && !variantStep && (
         <section className="lesson-play-layout">
           <aside ref={feedbackRef} className="lesson-guide-panel space-y-3">
             <BirdGuide {...birdForPlayStep(currentStep)} variant="sidebar" />
@@ -663,6 +819,18 @@ export function LessonPage() {
                   {ghostPlaying ? 'Watch closely…' : 'Watch Rico show you'}
                 </button>
               )}
+              {canTrySmaller && (
+                <button
+                  type="button"
+                  onClick={handleTrySmaller}
+                  disabled={variantLoading || animating || ghostPlaying}
+                  className="btn-hint"
+                  aria-label="Try a smaller version of this puzzle"
+                >
+                  <LightbulbIcon className="h-4 w-4" />
+                  {variantLoading ? 'Making one…' : 'Try a smaller version'}
+                </button>
+              )}
               {aiExplainEnabled && feedback?.status === 'incorrect' && lastAttempt && (
                 <button
                   type="button"
@@ -676,6 +844,11 @@ export function LessonPage() {
                 </button>
               )}
             </div>
+            {variantNotice && (
+              <p className="text-sm text-muted" role="status" aria-live="polite">
+                {variantNotice}
+              </p>
+            )}
           </aside>
 
           <div className="lesson-workspace space-y-4">
@@ -703,6 +876,7 @@ export function LessonPage() {
                   isTeleporting={isTeleporting}
                   isDeparting={isDeparting}
                   searchWindow={searchWindow}
+                  loopStuck={loopStuck}
                 />
               </div>
 
@@ -713,6 +887,7 @@ export function LessonPage() {
                   disabled={animating || ghostPlaying}
                   loopRange={currentStep.loopRange}
                   predicateOptions={currentStep.predicateOptions}
+                  iterations={iterations ?? undefined}
                   onChange={handleProgramChange}
                 />
 
@@ -749,6 +924,14 @@ export function LessonPage() {
                     <button type="button" onClick={goNext} className="btn-primary animate-pop-in">
                       {stepIndex + 1 >= totalSteps ? 'Finish' : 'Next'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={handleShare}
+                      className="btn-ghost animate-pop-in"
+                      aria-label="Copy a link to share this puzzle"
+                    >
+                      {shareCopied ? 'Link copied!' : 'Share this puzzle'}
+                    </button>
                   </div>
                 )}
               </div>
@@ -769,5 +952,272 @@ export function LessonPage() {
         />
       )}
     </div>
+  )
+}
+
+// #4: a self-contained, minimal player for the AI-generated "smaller version".
+// It owns its own program/explorer/run state and reuses the same MapGrid +
+// CommandSequence + checker as the main step, but never persists a saved program
+// (the learner's real puzzle is left untouched). On a correct run it reports the
+// solving instructions up to the parent and stays put so the learner can read
+// the encouraging feedback and choose to head back.
+function VariantPlayer({
+  step,
+  lessonTitle,
+  onExit,
+  onSolved,
+}: {
+  step: SequenceStep
+  lessonTitle: string
+  onExit: () => void
+  onSolved: (instructions: Instruction[]) => void
+}) {
+  const palette = useMemo(() => buildPalette(step), [step])
+
+  const [program, setProgram] = useState<ProgramNode[]>([])
+  const [explorer, setExplorer] = useState<Position>(step.map.start)
+  const [facing, setFacing] = useState<Command>('right')
+  const [crashed, setCrashed] = useState(false)
+  const [solved, setSolved] = useState(false)
+  const [animating, setAnimating] = useState(false)
+  const [activeTile, setActiveTile] = useState<Position | null>(null)
+  const [checkpointsDelivered, setCheckpointsDelivered] = useState(0)
+  const [taskPicked, setTaskPicked] = useState(0)
+  const [taskDropped, setTaskDropped] = useState(0)
+  const [gateState, setGateState] = useState<Record<string, boolean>>({})
+  const [keysCollected, setKeysCollected] = useState(0)
+  const [counter, setCounter] = useState<number | undefined>(undefined)
+  const [searchWindow, setSearchWindow] = useState<SearchWindow | null>(null)
+  const [isTeleporting, setIsTeleporting] = useState(false)
+  const [isDeparting, setIsDeparting] = useState(false)
+  const [iterations, setIterations] = useState<Map<string, number> | null>(null)
+  const [loopStuck, setLoopStuck] = useState(false)
+  const [feedback, setFeedback] = useState<{ status: 'correct' | 'incorrect'; message: string } | null>(null)
+
+  const timers = useRef<number[]>([])
+  const clearTimers = () => {
+    timers.current.forEach((id) => window.clearTimeout(id))
+    timers.current = []
+  }
+  useEffect(() => () => clearTimers(), [])
+
+  function resetRunState() {
+    setExplorer(step.map.start)
+    setCrashed(false)
+    setSolved(false)
+    setActiveTile(null)
+    setCheckpointsDelivered(0)
+    setTaskPicked(0)
+    setTaskDropped(0)
+    setGateState({})
+    setKeysCollected(0)
+    setCounter(undefined)
+    setSearchWindow(null)
+    setIsTeleporting(false)
+    setIsDeparting(false)
+    setIterations(null)
+    setLoopStuck(false)
+    setFeedback(null)
+  }
+
+  function handleProgramChange(next: ProgramNode[]) {
+    setProgram(next)
+    resetRunState()
+  }
+
+  function handleReset() {
+    setProgram([])
+    resetRunState()
+  }
+
+  function handleRun() {
+    if (animating) return
+    const instructions = program.map(nodeToInstruction)
+    const result = checkProgram(specForStep(step), instructions)
+    clearTimers()
+    setAnimating(true)
+    setCrashed(false)
+    setSolved(false)
+    setFeedback(null)
+    setActiveTile(result.run.path[0])
+    setExplorer(result.run.path[0])
+    playSound('runStart')
+
+    const bridge = step.map.bridge
+    const checkpoints = step.map.checkpoints ?? []
+    const frames = carryFrames(result.run.path, result.run.events)
+    const worldEvents = result.run.worldEvents
+    const counterAtPath = result.run.counterAtPath
+    const searchWindows = result.run.searchWindows
+    const teleportSteps = new Set<number>()
+    const teleportDepartSteps = new Set<number>()
+    for (const ev of worldEvents) {
+      if (ev.kind === 'teleport') teleportSteps.add(ev.pathIndex)
+      if (ev.kind === 'teleport-depart') teleportDepartSteps.add(ev.pathIndex)
+    }
+    setIsTeleporting(false)
+    setIsDeparting(false)
+    setCounter(counterAtPath ? counterAtPath[0] : undefined)
+    setSearchWindow(searchWindows ? searchWindows[0] : null)
+
+    result.run.path.forEach((pos, index) => {
+      const timer = window.setTimeout(() => {
+        setExplorer(pos)
+        setActiveTile(pos)
+        setCheckpointsDelivered(checkpointsVisitedInOrder(result.run.path.slice(0, index + 1), checkpoints))
+        setGateState(gateStatesAt(step.map, worldEvents, index))
+        setKeysCollected(keysCollectedAt(worldEvents, index))
+        setCounter(counterAtPath ? counterAtPath[index] : undefined)
+        setSearchWindow(searchWindows ? searchWindows[index] : null)
+        setIsTeleporting(teleportSteps.has(index))
+        setIsDeparting(teleportDepartSteps.has(index))
+        const frame = frames[index] ?? { picked: 0, dropped: 0 }
+        setTaskPicked((prev) => {
+          if (frame.picked > prev) playSound('pick')
+          return frame.picked
+        })
+        setTaskDropped((prev) => {
+          if (frame.dropped > prev) playSound('place')
+          return frame.dropped
+        })
+        if (index > 0) {
+          const dir = facingBetween(result.run.path[index - 1], pos)
+          if (dir) setFacing(dir)
+          if (bridge && pos.row === bridge.row && pos.col === bridge.col) {
+            playSound('bridge')
+          } else {
+            playSound('step')
+          }
+        }
+      }, index * STEP_MS)
+      timers.current.push(timer)
+    })
+
+    const endTimer = window.setTimeout(
+      () => {
+        setAnimating(false)
+        setActiveTile(null)
+        setIsTeleporting(false)
+        setIsDeparting(false)
+        if (counterAtPath && counterAtPath.length > 0) setCounter(counterAtPath[counterAtPath.length - 1])
+        if (searchWindows && searchWindows.length > 0) setSearchWindow(searchWindows[searchWindows.length - 1])
+        setCheckpointsDelivered(
+          result.correct ? checkpoints.length : checkpointsVisitedInOrder(result.run.path, checkpoints),
+        )
+        const lastFrame = frames[frames.length - 1] ?? { picked: 0, dropped: 0 }
+        setTaskPicked(lastFrame.picked)
+        setTaskDropped(lastFrame.dropped)
+        setGateState(gateStatesAt(step.map, worldEvents, result.run.path.length))
+        setKeysCollected(keysCollectedAt(worldEvents, result.run.path.length))
+        setIterations(iterationMap(program, result.run))
+        setLoopStuck(result.run.status === 'loopStuck')
+        if (!result.correct && result.run.status !== 'success') setCrashed(true)
+        if (result.correct) setSolved(true)
+        playSound(result.correct ? 'success' : 'error')
+        if (result.correct) {
+          setFeedback({ status: 'correct', message: result.message })
+          onSolved(instructions)
+        } else {
+          setFeedback({ status: 'incorrect', message: result.message })
+        }
+      },
+      result.run.path.length * STEP_MS + 60,
+    )
+    timers.current.push(endTimer)
+  }
+
+  const bird: { message: string; mood: BirdMood } =
+    feedback?.status === 'correct'
+      ? { message: feedback.message, mood: 'celebrate' }
+      : feedback?.status === 'incorrect'
+        ? { message: feedback.message, mood: 'oops' }
+        : { message: step.prompt, mood: 'explain' }
+
+  return (
+    <section className="lesson-play-layout">
+      <aside className="lesson-guide-panel space-y-3">
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5">
+          <span className="section-label">Smaller version</span>
+          <button type="button" onClick={onExit} disabled={animating} className="btn-hint cursor-pointer">
+            ← Back to your puzzle
+          </button>
+        </div>
+        <BirdGuide {...bird} variant="sidebar" />
+      </aside>
+
+      <div className="lesson-workspace space-y-4">
+        <div className="puzzle-header puzzle-header--compact">
+          <p className="section-label">{lessonTitle} · warm-up</p>
+          <h1 className="puzzle-goal">{step.goal}</h1>
+        </div>
+
+        <div className="lesson-workspace__main">
+          <div className="lesson-map-column">
+            <MapGrid
+              map={step.map}
+              explorer={explorer}
+              crashed={crashed}
+              solved={solved}
+              facing={facing}
+              activeTile={activeTile}
+              checkpointsDelivered={checkpointsDelivered}
+              taskPicked={taskPicked}
+              taskDropped={taskDropped}
+              gateState={gateState}
+              keysCollected={keysCollected}
+              ghostPath={null}
+              ghostStep={0}
+              isTeleporting={isTeleporting}
+              isDeparting={isDeparting}
+              searchWindow={searchWindow}
+              loopStuck={loopStuck}
+            />
+          </div>
+
+          <div className="lesson-workspace__controls space-y-4">
+            <CommandSequence
+              palette={palette}
+              program={program}
+              disabled={animating}
+              loopRange={step.loopRange}
+              predicateOptions={step.predicateOptions}
+              iterations={iterations ?? undefined}
+              onChange={handleProgramChange}
+            />
+
+            <div className="action-bar">
+              <button
+                type="button"
+                onClick={handleRun}
+                disabled={animating || program.length === 0}
+                className={`btn-success flex cursor-pointer items-center gap-2 ${animating ? 'animate-run-pulse' : ''}`}
+              >
+                <svg viewBox="0 0 24 24" className={`h-4 w-4 ${animating ? 'animate-pulse' : ''}`} aria-hidden="true">
+                  <path d="M7 5l12 7-12 7z" fill="currentColor" />
+                </svg>
+                {animating ? 'Running…' : 'Run program'}
+              </button>
+              <button type="button" onClick={handleReset} disabled={animating} className="btn-ghost cursor-pointer">
+                Reset
+              </button>
+              {counter !== undefined && (
+                <span className="steps-badge" aria-live="polite">
+                  <span className="steps-badge__label">Steps</span>
+                  <span className="steps-badge__value">{counter}</span>
+                </span>
+              )}
+            </div>
+
+            {feedback?.status === 'correct' && (
+              <div className="next-bar">
+                <button type="button" onClick={onExit} className="btn-primary animate-pop-in">
+                  Back to your puzzle
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
   )
 }

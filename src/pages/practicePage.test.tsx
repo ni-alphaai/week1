@@ -49,6 +49,8 @@ const holder = vi.hoisted(() => {
     navStep,
     current: base as Record<string, unknown>,
     concept: 'loops' as string | null,
+    // Spy for the mastery-persistence call, asserted by the #2 test below.
+    recordPracticeResult: vi.fn(),
   }
 })
 
@@ -80,8 +82,19 @@ vi.mock('../content/registry', () => ({
   registerGeneratedPuzzle: vi.fn(),
 }))
 vi.mock('../context/LearnerContext', () => ({
-  useLearner: () => ({ ready: true, activeLearner: { id: 'kid-1', name: 'Kid' }, state: null }),
+  useLearner: () => ({
+    ready: true,
+    activeLearner: { id: 'kid-1', name: 'Kid' },
+    state: null,
+    recordPracticeResult: holder.recordPracticeResult,
+    pendingBadges: [],
+    consumePendingBadges: () => [],
+    clearPendingBadges: vi.fn(),
+  }),
 }))
+// BadgeToast self-manages via context; stub it so the player tests don't depend
+// on the concurrently-built component.
+vi.mock('../components/BadgeToast', () => ({ BadgeToast: () => null }))
 
 import { PracticePage } from './PracticePage'
 import { generatePuzzle } from '../ai/generation'
@@ -115,6 +128,7 @@ beforeEach(() => {
   // Reset the shared fixtures + generation mock so each test starts clean.
   holder.current = { ...holder.base }
   holder.concept = 'loops'
+  holder.recordPracticeResult.mockReset()
   mockGeneratePuzzle.mockReset()
   mockGeneratePuzzle.mockResolvedValue({ aiGenerated: true, difficulty: 4 } as never)
   // The prefetch cache is module-level (survives navigation in the app); clear
@@ -143,6 +157,35 @@ describe('PracticePage (loop puzzles)', () => {
 
     // Repeat 3× right reaches the goal -> solved -> the "Next puzzle" button shows.
     expect(await screen.findByText('Next puzzle', undefined, { timeout: 4000 })).toBeInTheDocument()
+  })
+
+  it('persists a correct run to mastery via recordPracticeResult', async () => {
+    holder.current = { ...holder.base, initialProgram: holder.loopSolution, editableInitial: true }
+    renderPractice()
+
+    await screen.findByText(/Repeat …× block/)
+    fireEvent.click(screen.getByRole('button', { name: 'Run program' }))
+
+    // The end-of-run timer fires once the "Next puzzle" affordance appears.
+    await screen.findByText('Next puzzle', undefined, { timeout: 4000 })
+
+    expect(holder.recordPracticeResult).toHaveBeenCalledTimes(1)
+    const call = holder.recordPracticeResult.mock.calls[0]
+    // (lesson, stepId, correct, opts)
+    expect(call[1]).toBe('practice-loop-test')
+    expect(call[2]).toBe(true)
+    expect(call[3]).toMatchObject({ optimalSolved: false })
+  })
+
+  it('offers a "Share this puzzle" button after a correct run', async () => {
+    holder.current = { ...holder.base, initialProgram: holder.loopSolution, editableInitial: true }
+    renderPractice()
+
+    await screen.findByText(/Repeat …× block/)
+    fireEvent.click(screen.getByRole('button', { name: 'Run program' }))
+    await screen.findByText('Next puzzle', undefined, { timeout: 4000 })
+
+    expect(screen.getByRole('button', { name: 'Share this puzzle' })).toBeInTheDocument()
   })
 })
 

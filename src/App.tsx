@@ -13,6 +13,8 @@ const CoursePage = lazy(() => import('./pages/CoursePage').then((m) => ({ defaul
 const LessonPage = lazy(() => import('./pages/LessonPage').then((m) => ({ default: m.LessonPage })))
 const PracticePage = lazy(() => import('./pages/PracticePage').then((m) => ({ default: m.PracticePage })))
 const ParentPage = lazy(() => import('./pages/ParentPage').then((m) => ({ default: m.ParentPage })))
+const SharePage = lazy(() => import('./pages/SharePage').then((m) => ({ default: m.SharePage })))
+const ReviewPage = lazy(() => import('./pages/ReviewPage').then((m) => ({ default: m.ReviewPage })))
 
 function AppRoutes() {
   return (
@@ -25,6 +27,10 @@ function AppRoutes() {
         <Route path="/course" element={<CoursePage />} />
         <Route path="/lesson/:lessonId" element={<LessonPage />} />
         <Route path="/practice/:lessonId" element={<PracticePage />} />
+        <Route path="/review" element={<ReviewPage />} />
+        {/* Public shared puzzle: reachable without an active learner. It renders
+            under LearnerProvider but never reads or records learner state. */}
+        <Route path="/share/:code" element={<SharePage />} />
         <Route path="/parent" element={<ParentPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

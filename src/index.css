@@ -2506,3 +2506,118 @@ body {
   .beat-cell--active { animation: none !important; }
   .beat-cell--active .beat-cell__incoming { animation: none !important; }
 }
+
+/* --- Wave 2: loop-stuck + iteration badges + badge toast --- */
+
+/* Explorer "stuck in a loop" state — a spinning amber ring around the token,
+   visually distinct from the red crash X. */
+.explorer-token--stuck {
+  background: var(--color-warning);
+  box-shadow:
+    0 2px 10px rgb(230 168 23 / 0.4),
+    inset 0 0 0 2px rgb(255 255 255 / 0.85);
+}
+
+.explorer-stuck-ring {
+  position: absolute;
+  inset: -18%;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.explorer-stuck-ring__spinner {
+  width: 100%;
+  height: 100%;
+  border-radius: 9999px;
+  border: 2.5px solid rgb(230 168 23 / 0.25);
+  border-top-color: var(--color-warning);
+  animation: explorer-stuck-spin 0.85s linear infinite;
+}
+
+@keyframes explorer-stuck-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Per-loop iteration badge in the program editor — small, non-interactive. */
+.block-iter-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  color: var(--color-info);
+  background: rgb(59 158 201 / 0.12);
+  box-shadow: inset 0 0 0 1px rgb(59 158 201 / 0.3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Badge-earned toast — fixed celebratory card, top-center. */
+.badge-toast {
+  position: fixed;
+  top: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: 0.75rem 1rem;
+  border-radius: 16px;
+  background: var(--color-surface);
+  border: 1px solid rgb(245 183 60 / 0.45);
+  box-shadow: 0 14px 40px rgb(0 0 0 / 0.16);
+  cursor: pointer;
+}
+
+.badge-toast__medal {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  color: #fff;
+  background: linear-gradient(135deg, #ffe08a, #f5b73c);
+  box-shadow: 0 4px 12px rgb(245 183 60 / 0.5);
+}
+
+.badge-toast__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.badge-toast__kicker {
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #d98a00;
+}
+
+.badge-toast__title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--color-text);
+  letter-spacing: -0.01em;
+}
+
+.badge-toast__blurb {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--color-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .explorer-stuck-ring__spinner { animation: none !important; }
+}

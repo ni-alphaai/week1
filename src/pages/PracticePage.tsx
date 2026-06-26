@@ -8,7 +8,9 @@ import type { RunResult } from '../engine/map'
 import { MapGrid } from '../components/MapGrid'
 import { CommandSequence } from '../components/CommandSequence'
 import type { PaletteItem, ProgramNode } from '../components/CommandSequence'
-import { nodeToInstruction, instructionToNode } from '../components/programNodes'
+import { nodeToInstruction, instructionToNode, iterationMap } from '../components/programNodes'
+import { BadgeToast } from '../components/BadgeToast'
+import { encodePuzzle, type ShareablePuzzle } from '../content/shareCode'
 import { BirdGuide, type BirdMood } from '../components/BirdGuide'
 import { SoundToggle } from '../components/SoundToggle'
 import { SparkleIcon, CompassIcon } from '../components/icons'
@@ -84,7 +86,7 @@ function puzzleSignature(puzzle: GeneratedPuzzle): string {
 export function PracticePage() {
   const { lessonId } = useParams()
   const navigate = useNavigate()
-  const { ready, activeLearner, state } = useLearner()
+  const { ready, activeLearner, state, recordPracticeResult } = useLearner()
   const lesson = useMemo(() => (lessonId ? getLesson(lessonId) : undefined), [lessonId])
 
   const [step, setStep] = useState<SequenceStep | null>(null)
@@ -102,9 +104,17 @@ export function PracticePage() {
   const [explainText, setExplainText] = useState<string | null>(null)
   const [explainLoading, setExplainLoading] = useState(false)
   const [direction, setDirection] = useState<'easier' | 'same' | 'harder'>('same')
+  // Per-block loop iteration counts from the last run, surfaced on the cards.
+  const [iterations, setIterations] = useState<Map<string, number> | null>(null)
+  // Whether the last run hit a loop that never made progress (loopStuck).
+  const [loopStuck, setLoopStuck] = useState(false)
+  // Brief "Link copied!" confirmation after sharing the current puzzle.
+  const [shareCopied, setShareCopied] = useState(false)
 
   // Within-session running success, so difficulty adapts round to round.
   const sessionRef = useRef({ attempts: 0, correct: 0 })
+  // When the current puzzle was shown, for measuring solve time.
+  const startedAtRef = useRef<number>(Date.now())
   const timers = useRef<number[]>([])
   const isMounted = useRef(true)
   // Single-flight guard: ignore re-entrant loadPuzzle calls while one is running.
@@ -182,6 +192,9 @@ export function PracticePage() {
       setLastAttempt(null)
       setCrashed(false)
       setSolved(false)
+      setIterations(null)
+      setLoopStuck(false)
+      setShareCopied(false)
       setProgram([])
 
       // Lessons with no matching generator skip AI entirely and abstain to
@@ -231,6 +244,8 @@ export function PracticePage() {
       setProgram(initialNodesFor(practiceStep))
       setExplorer(practiceStep.map.start)
       setFacing('right')
+      // Start the solve-time clock now that a fresh puzzle is on screen.
+      startedAtRef.current = Date.now()
       setLoading(false)
     } finally {
       busyRef.current = false
@@ -260,6 +275,9 @@ export function PracticePage() {
     if (step) setExplorer(step.map.start)
     setCrashed(false)
     setSolved(false)
+    setIterations(null)
+    setLoopStuck(false)
+    setShareCopied(false)
     setActiveTile(null)
     setFeedback(null)
     setExplainText(null)
@@ -273,7 +291,7 @@ export function PracticePage() {
   }
 
   function handleRun() {
-    if (!step || animating) return
+    if (!step || !lesson || animating) return
     const instructions = program.map(nodeToInstruction)
     const result = checkProgram(
       { map: step.map, successRule: step.successRule, optimal: step.optimal, feedback: step.feedback },
@@ -283,6 +301,9 @@ export function PracticePage() {
     setAnimating(true)
     setCrashed(false)
     setSolved(false)
+    setLoopStuck(false)
+    setIterations(null)
+    setShareCopied(false)
     setFeedback(null)
     setExplainText(null)
     setActiveTile(result.run.path[0])
@@ -307,11 +328,20 @@ export function PracticePage() {
       setActiveTile(null)
       if (!result.correct && result.run.status !== 'success') setCrashed(true)
       if (result.correct) setSolved(true)
+      setLoopStuck(result.run.status === 'loopStuck')
+      setIterations(iterationMap(program, result.run))
       playSound(result.correct ? 'success' : 'error')
       setFeedback({ status: result.correct ? 'correct' : 'incorrect', message: result.message })
       sessionRef.current.attempts += 1
       if (result.correct) sessionRef.current.correct += 1
       else setLastAttempt({ run: result.run, instructions })
+      // Persist the attempt to mastery (in addition to the in-session bump above).
+      const solveMs = result.correct ? Date.now() - startedAtRef.current : 0
+      recordPracticeResult(lesson, step.id, result.correct, {
+        program: instructions,
+        optimalSolved: false,
+        solveMs,
+      })
     }, result.run.path.length * STEP_MS + 60)
     timers.current.push(endTimer)
   }
@@ -337,6 +367,27 @@ export function PracticePage() {
     } finally {
       setExplainLoading(false)
     }
+  }
+
+  function handleShare() {
+    if (!step) return
+    playSound('click')
+    const payload: ShareablePuzzle = {
+      map: step.map,
+      availableCommands: step.availableCommands,
+      availableActions: step.availableActions,
+      blocks: step.blocks,
+      predicateOptions: step.predicateOptions,
+      loopRange: step.loopRange,
+      cardLimits: step.cardLimits,
+      solution: step.solution,
+      goal: step.goal,
+      prompt: step.prompt,
+      feedback: step.feedback,
+    }
+    const url = `${window.location.origin}/share/${encodePuzzle(payload)}`
+    void navigator.clipboard?.writeText(url)
+    setShareCopied(true)
   }
 
   function bird(): { message: string; mood: BirdMood } {
@@ -367,6 +418,7 @@ export function PracticePage() {
 
   return (
     <div className="lesson-shell mx-auto px-4 pb-20 pt-6 lg:pb-8">
+      <BadgeToast />
       <header className="lesson-header mb-4 lg:mb-5">
         {backLink}
         <div className="flex items-center gap-3">
@@ -440,6 +492,7 @@ export function PracticePage() {
                   explorer={explorer}
                   crashed={crashed}
                   solved={solved}
+                  loopStuck={loopStuck}
                   facing={facing}
                   activeTile={activeTile}
                 />
@@ -452,6 +505,7 @@ export function PracticePage() {
                   disabled={animating}
                   loopRange={step.loopRange}
                   predicateOptions={step.predicateOptions}
+                  iterations={iterations ?? undefined}
                   onChange={handleProgramChange}
                 />
 
@@ -479,6 +533,9 @@ export function PracticePage() {
                   <div className="next-bar">
                     <button type="button" onClick={() => void loadPuzzle()} className="btn-primary animate-pop-in">
                       Next puzzle
+                    </button>
+                    <button type="button" onClick={handleShare} className="btn-ghost cursor-pointer">
+                      {shareCopied ? 'Link copied!' : 'Share this puzzle'}
                     </button>
                   </div>
                 )}

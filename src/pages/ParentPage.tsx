@@ -1,9 +1,18 @@
 import { Link } from 'react-router-dom'
 import { useLearner } from '../context/LearnerContext'
 import { course, listLessons } from '../content/registry'
-import { courseCompletionPercent, masteryScore, masteryTier, type MasteryTier } from '../storage/progress'
-import { ArrowIcon, DropIcon, PickupIcon, BadgeIcon, FlameIcon } from '../components/icons'
+import {
+  courseCompletionPercent,
+  masteryScore,
+  masteryTier,
+  skillStruggles,
+  stuckSteps,
+  type MasteryTier,
+} from '../storage/progress'
+import { ArrowIcon, DropIcon, PickupIcon, BadgeIcon, FlameIcon, LockIcon } from '../components/icons'
 import { ProgressRing } from '../components/ProgressRing'
+import { BADGES, BADGE_LABELS } from '../content/badges'
+import { aiEnabled } from '../ai/config'
 import { isAction } from '../types'
 
 const SKILL_LABELS: Record<string, string> = {
@@ -15,9 +24,17 @@ const SKILL_LABELS: Record<string, string> = {
   planning: 'Planning & problem-solving',
 }
 
-const BADGE_LABELS: Record<string, string> = {
-  'combo-coder': 'Combo Coder',
-  'algorithm-ace': 'Algorithm Ace',
+// Labels for the lesson-completion award badges, which live on the lessons (not
+// in content/badges). Used as a fallback for any id BADGE_LABELS doesn't cover.
+const AWARD_LABELS: Record<string, { title: string; blurb: string }> = {
+  'combo-coder': { title: 'Combo Coder', blurb: 'Completed the loops lesson.' },
+  'algorithm-ace': { title: 'Algorithm Ace', blurb: 'Completed the algorithm challenges.' },
+}
+
+// Resolve a badge id to its richer label, preferring the content/badges source
+// of truth and falling back to the lesson-award map, then the raw id.
+function badgeLabel(id: string): { title: string; blurb: string } {
+  return BADGE_LABELS[id] ?? AWARD_LABELS[id] ?? { title: id, blurb: '' }
 }
 
 const TIER_CLASS: Record<MasteryTier, string> = {
@@ -104,6 +121,12 @@ export function ParentPage() {
   const notYet = Math.max(0, totalPuzzles - puzzlesSolved)
   const skills = Object.entries(state.skillStats)
   const badges = state.badges ?? []
+  const lockedBadges = BADGES.filter((b) => !badges.includes(b.id))
+  const stuck = stuckSteps(state)
+  const struggles = skillStruggles(state)
+  const struggleBySkill = new Map(struggles.map((s) => [s.skillId, s]))
+  const usage = state.aiUsage
+  const aiActivity = aiEnabled && usage && Object.values(usage).some((value) => value > 0)
 
   const ranked = skills
     .map(([id, stat]) => ({ id, score: masteryScore(stat), attempts: stat.attempts }))
@@ -154,18 +177,42 @@ export function ParentPage() {
         </div>
       </section>
 
-      {badges.length > 0 && (
-        <section className="mt-6">
-          <h2 className="section-label mb-2">Badges</h2>
+      <section className="mt-6">
+        <h2 className="section-label mb-2">Badges</h2>
+        {badges.length > 0 ? (
           <div className="flex flex-wrap gap-2">
-            {badges.map((id) => (
-              <span key={id} className="badge-chip badge-chip--lg">
-                <BadgeIcon className="h-5 w-5" /> {BADGE_LABELS[id] ?? id}
-              </span>
-            ))}
+            {badges.map((id) => {
+              const label = badgeLabel(id)
+              return (
+                <span key={id} className="badge-chip badge-chip--lg" title={label.blurb}>
+                  <BadgeIcon className="h-5 w-5" /> {label.title}
+                </span>
+              )
+            })}
           </div>
-        </section>
-      )}
+        ) : (
+          <p className="card p-4 text-sm text-muted">
+            No badges yet — solve puzzles and use loops, whiles, and ifs to start earning them.
+          </p>
+        )}
+
+        {lockedBadges.length > 0 && (
+          <>
+            <h3 className="section-label mb-2 mt-4 text-soft">Goals to unlock</h3>
+            <div className="flex flex-wrap gap-2">
+              {lockedBadges.map((badge) => (
+                <span
+                  key={badge.id}
+                  className="badge-chip badge-chip--lg opacity-55 grayscale"
+                  title={badge.blurb}
+                >
+                  <LockIcon className="h-4 w-4" /> {badge.title}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+      </section>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <div className="card p-5">
@@ -211,6 +258,46 @@ export function ParentPage() {
         </div>
       </div>
 
+      {aiActivity && (
+        <section className="mt-6">
+          <h2 className="section-label mb-2">Rico&apos;s help</h2>
+          <div className="card p-5">
+            <p className="text-sm text-[var(--color-text)]">
+              Rico explained {usage.explainServed} mistake{usage.explainServed === 1 ? '' : 's'}, fell back to written
+              hints {usage.explainFallback} time{usage.explainFallback === 1 ? '' : 's'}, blocked{' '}
+              {usage.explainLeakBlocked} answer leak{usage.explainLeakBlocked === 1 ? '' : 's'}, and made{' '}
+              {usage.genServed} fresh puzzle{usage.genServed === 1 ? '' : 's'} ({usage.genAbstained} time
+              {usage.genAbstained === 1 ? '' : 's'} it couldn&apos;t).
+            </p>
+            <p className="mt-2 text-xs text-soft">
+              Rico only ever nudges — it never hands over the answer, and it falls back to authored hints whenever it is
+              unsure.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {stuck.length > 0 && (
+        <section className="mt-6">
+          <h2 className="section-label mb-2">Where {name} is stuck</h2>
+          <div className="space-y-2">
+            {stuck.map((s) => (
+              <div key={s.stepId} className="card p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-[var(--color-text)]">{s.lessonTitle}</span>
+                  <span className="text-xs text-muted">
+                    {s.incorrect} tries · {Math.round(s.timeSpentMs / 60000)} min
+                  </span>
+                </div>
+                <p className="mt-1.5 text-xs text-soft">
+                  This one&apos;s taken a few goes — a quick sit-together or a hint could help it click.
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="mt-6">
         <h2 className="section-label mb-2">Skills &amp; mastery</h2>
         {skills.length === 0 ? (
@@ -225,7 +312,14 @@ export function ParentPage() {
               return (
                 <div key={skillId} className="card p-4">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="font-medium text-[var(--color-text)]">{SKILL_LABELS[skillId] ?? skillId}</span>
+                    <span className="flex items-center gap-2 font-medium text-[var(--color-text)]">
+                      {SKILL_LABELS[skillId] ?? skillId}
+                      {(struggleBySkill.get(skillId)?.struggles ?? 0) > 0 && (
+                        <span className="rounded-full bg-[var(--color-surface-strong)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-soft">
+                          needs review
+                        </span>
+                      )}
+                    </span>
                     <span className={`tier-badge ${TIER_CLASS[tier]}`}>{tier}</span>
                   </div>
                   <div className="progress-track">

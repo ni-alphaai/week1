@@ -207,6 +207,12 @@ interface CommandSequenceProps {
   loopRange?: { min: number; max: number }
   predicateOptions?: PredicateOption[]
   onChange: (next: ProgramNode[]) => void
+  /**
+   * Optional per-node run counts, keyed by ProgramNode id. When present for a
+   * loop/while node, its header shows a small "ran {n}×" badge. Purely
+   * informational — absent entries (or the whole prop) change nothing.
+   */
+  iterations?: Map<string, number>
 }
 
 interface PaletteSession {
@@ -314,6 +320,7 @@ export function CommandSequence({
   loopRange = { min: 1, max: 9 },
   predicateOptions = [],
   onChange,
+  iterations,
 }: CommandSequenceProps) {
   const [ghost, setGhost] = useState<GhostState | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget>(null)
@@ -595,6 +602,18 @@ export function CommandSequence({
     )
   }
 
+  // Best-effort run-count badge for a loop/while header. Renders nothing unless
+  // `iterations` has an entry for this node, so layout is untouched by default.
+  function iterBadge(nodeId: string) {
+    const n = iterations?.get(nodeId)
+    if (n === undefined) return null
+    return (
+      <span className="block-iter-badge" aria-label={`ran ${n} times`}>
+        ran {n}×
+      </span>
+    )
+  }
+
   function renderBlock(node: ProgramNode, parentPath: NodePath) {
     const dim = draggingId === node.id ? 'opacity-40' : ''
     const setRef = (el: HTMLElement | null) => {
@@ -635,6 +654,7 @@ export function CommandSequence({
               </button>
             </span>
             <span className="block-keyword">times</span>
+            {iterBadge(node.id)}
             {!node.locked && removeButton(node.id)}
           </div>
           {renderZone([...parentPath, { id: node.id, slot: 'body' }], node.body, null, 'Drag cards to repeat')}
@@ -653,6 +673,7 @@ export function CommandSequence({
             <span className="block-keyword">While</span>
             {predicatePicker(node)}
             <span className="block-keyword">do</span>
+            {iterBadge(node.id)}
             {!node.locked && removeButton(node.id)}
           </div>
           {renderZone([...parentPath, { id: node.id, slot: 'body' }], node.body, null, 'Drag cards to repeat')}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLearner } from '../context/LearnerContext'
 import { useAuth } from '../context/AuthContext'
@@ -140,9 +140,17 @@ function ProfileGate() {
 }
 
 function HomeDashboard() {
-  const { activeLearner, state, signOut } = useLearner()
+  const { activeLearner, state, signOut, refreshReviewQueue } = useLearner()
   const { enabled, user, signOutParent } = useAuth()
   const navigate = useNavigate()
+
+  // Recompute the spaced-review due queue once on entry (the selector itself is
+  // a no-op after the first run of the local day).
+  useEffect(() => {
+    refreshReviewQueue()
+  }, [refreshReviewQueue])
+
+  const dueCount = state?.review?.dueQueue.length ?? 0
   const lessons = listLessons()
   const completed = state?.completedLessonIds ?? []
   const completedInCourse = course.lessonOrder.filter((id) => completed.includes(id)).length
@@ -224,6 +232,26 @@ function HomeDashboard() {
           </span>
         </div>
       </button>
+
+      {dueCount > 0 && (
+        <Link
+          to="/review"
+          onClick={() => playSound('click')}
+          className="card card-interactive animate-float-in mt-4 flex items-center gap-3 px-4 py-3"
+          style={{ animationDelay: '0.1s' }}
+        >
+          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#8b6fd4] text-white shadow-sm">
+            <LightbulbIcon className="h-5 w-5" />
+          </span>
+          <span className="flex-1">
+            <span className="block font-semibold text-[var(--color-text)]">Daily review</span>
+            <span className="block text-sm text-muted">
+              {dueCount} skill{dueCount === 1 ? '' : 's'} ready for a quick refresher
+            </span>
+          </span>
+          <span className="text-lg text-soft">›</span>
+        </Link>
+      )}
 
       <div className="mt-8 space-y-2">
         <button type="button" onClick={signOut} className="btn-ghost w-full">
