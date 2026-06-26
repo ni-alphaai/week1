@@ -15,6 +15,9 @@ dist-ssr
 # Firebase deploy cache
 .firebase/
 
+# Brainstorming visual-companion scratch files
+.superpowers/
+
 # Local environment config (Firebase keys). .env.example stays tracked.
 .env
 .env.*

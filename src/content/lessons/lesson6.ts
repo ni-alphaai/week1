@@ -1,8 +1,5 @@
 import type { Conditional, Instruction, Lesson, Loop, PredicateOption, While } from '../../types'
 
-type Dir = 'right' | 'up' | 'left' | 'down'
-const cap = (dir: Dir) => `${dir[0].toUpperCase()}${dir.slice(1)}`
-
 // Run `body` an exact number of times.
 const repeat = (count: number, body: Instruction[], label: string): Loop => ({
   kind: 'loop',
@@ -11,21 +8,6 @@ const repeat = (count: number, body: Instruction[], label: string): Loop => ({
   label,
 })
 
-// Keep running `body` while `dir` is clear (used to scan a corridor).
-const whileClear = (dir: Dir, body: Instruction[]): While => ({
-  kind: 'while',
-  predicate: { sensor: 'clear', dir },
-  body,
-  label: `${cap(dir)} is clear`,
-})
-
-// The counter conditions, with kid-friendly labels.
-const evenOdd: PredicateOption[] = [
-  { predicate: { sensor: 'counterEven' }, label: 'count is even' },
-  { predicate: { sensor: 'counterOdd' }, label: 'count is odd' },
-]
-const clearRight: PredicateOption = { predicate: { sensor: 'clear', dir: 'right' }, label: 'Right is clear' }
-const clearUp: PredicateOption = { predicate: { sensor: 'clear', dir: 'up' }, label: 'Up is clear' }
 const divBy3: PredicateOption = {
   predicate: { sensor: 'counterMod', divisor: 3, remainder: 0 },
   label: 'count divides by 3',
@@ -35,343 +17,290 @@ const divBy5: PredicateOption = {
   label: 'count divides by 5',
 }
 
-const loopRange = { min: 1, max: 8 }
+// Comparison sensors for the higher/lower number search.
+const searching: PredicateOption = { predicate: { sensor: 'targetNotFound' }, label: 'still searching' }
+const numberHigher: PredicateOption = { predicate: { sensor: 'targetHigher' }, label: 'the number is higher' }
+const numberLower: PredicateOption = { predicate: { sensor: 'targetLower' }, label: 'the number is lower' }
+
+// One FizzBuzz decision as a beat reaction: check divide-by-3 on the outside,
+// divide-by-5 inside each branch. Both-divisible -> SUPER, 3-only -> DASH,
+// 5-only -> SHIELD, neither -> HOLD. The nesting is what makes the both-beat
+// emit SUPER instead of a plain DASH or SHIELD.
+const fizzBuzzBeat = (): Conditional => ({
+  kind: 'conditional',
+  predicate: { sensor: 'counterMod', divisor: 3, remainder: 0 },
+  then: [
+    {
+      kind: 'conditional',
+      predicate: { sensor: 'counterMod', divisor: 5, remainder: 0 },
+      then: ['super'],
+      else: ['dash'],
+      label: 'count divides by 5',
+    } as Conditional,
+  ],
+  else: [
+    {
+      kind: 'conditional',
+      predicate: { sensor: 'counterMod', divisor: 5, remainder: 0 },
+      then: ['shield'],
+      else: ['hold'],
+      label: 'count divides by 5',
+    } as Conditional,
+  ],
+  label: 'count divides by 3',
+})
 
 export const lesson6: Lesson = {
-  id: 'lesson-6-counter-code',
-  version: 2,
-  title: 'Counter Code',
-  subtitle: 'Your explorer counts its steps — turn that count into a calculator.',
+  id: 'lesson-6-challenges',
+  version: 1,
+  title: 'Challenges',
+  subtitle: 'Famous coding-interview puzzles, rebuilt for your explorer.',
   sequence: 6,
   skillIds: ['conditionals', 'loops', 'planning'],
   award: {
-    id: 'master-coder',
-    title: 'Master Coder',
-    blurb: 'Turned the step counter into a calculator — even/odd and modulo logic mastered.',
+    id: 'algorithm-ace',
+    title: 'Algorithm Ace',
+    blurb: 'Cracked FizzBuzz with nested Ifs, multiplied steps with nested loops, and ran a real binary search — true algorithm thinking.',
   },
   steps: [
     {
-      id: 'l6-intro',
+      id: 'c7-intro',
       type: 'concept',
-      title: 'The step counter',
-      body: 'Your explorer **counts every step it takes**, starting at **zero**. Your If blocks can now sense that count — check if it\'s **even**, **odd**, or **divisible by a number** — and behave differently on each step. Some tiles even **boost** the count when you land on them. Clear all five to earn your **Master Coder** badge!',
+      title: 'Real algorithms',
+      body: 'Three puzzles real programmers know. Build **FizzBuzz** with an If inside an If, **multiply your steps** with a loop inside a loop, and run a **binary search** that jumps to the middle and tosses half the tiles every guess. Clear them to earn your **Algorithm Ace** badge.',
     },
     {
-      id: 'l6-q1',
-      type: 'conditional',
-      requiresConditional: false,
-      goal: 'Even or odd',
-      prompt: 'Reach the treasure at the top-right corner. The field is open, so only your step count can tell you when to climb and when to step forward. The counter starts at 0 (even). Work out the rule and set the Repeat count.',
-      map: {
-        rows: 3,
-        cols: 3,
-        start: { row: 2, col: 0 },
-        goal: { row: 0, col: 2 },
-      },
-      availableCommands: ['up', 'right', 'down', 'left'],
+      id: 'c7-fizzbuzz-intro',
+      type: 'concept',
+      title: 'Dodge the beat',
+      body: 'Rico faces the beat. The count ticks 0, 1, 2, 3, 4… and a beat flies at him each tick.\n\nThree beats are special:\nwhen the count **divides by 3**, Rico must **Dash**\nwhen the count **divides by 5**, Rico must **Shield**\nevery other beat, he just **Holds**\n\nThe twist: on a beat like **0** or **15**, the count divides by 3 **and** 5 at once — that needs a single **Super** move, not a Dash or a Shield.\n\nChecking "divides by 3?" and "divides by 5?" side by side misses those double beats. Programmers call this puzzle **FizzBuzz**, and the trick is to nest one **If inside another**: ask "divides by 3?", and *inside* it ask "divides by 5?". Now every beat has exactly one action.',
+    },
+    {
+      id: 'c7-fizzbuzz',
+      type: 'beat',
+      goal: 'FizzBuzz',
+      prompt: 'Beats fly in on the count 0, 1, 2, 3… Divides by 3 → Dash, divides by 5 → Shield, the rare both-beat needs a Super, otherwise Hold. Nest one If inside another to catch the both-beats, then set the Repeat to cover all 16 beats.',
+      count: 16,
+      rules: [
+        { predicate: { sensor: 'counterMod', divisor: 15, remainder: 0 }, action: 'super' },
+        { predicate: { sensor: 'counterMod', divisor: 3, remainder: 0 }, action: 'dash' },
+        { predicate: { sensor: 'counterMod', divisor: 5, remainder: 0 }, action: 'shield' },
+      ],
+      defaultAction: 'hold',
+      availableActions: ['dash', 'shield', 'super', 'hold'],
       blocks: ['loop', 'if'],
-      predicateOptions: evenOdd,
-      loopRange,
-      cardLimits: { up: 1, right: 1 },
-      initialProgram: [
-        repeat(
-          1,
-          [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'counterEven' },
-              then: [],
-              else: [],
-              label: 'count is even',
-            } as Conditional,
-          ],
-          'Repeat 1×',
-        ),
-      ],
-      solution: [
-        repeat(
-          4,
-          [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'counterEven' },
-              then: ['up'],
-              else: ['right'],
-              label: 'count is even',
-            } as Conditional,
-          ],
-          'Repeat 4× → if count is even',
-        ),
-      ],
+      predicateOptions: [divBy3, divBy5],
+      loopRange: { min: 1, max: 16 },
+      cardLimits: { dash: 1, shield: 1, super: 1, hold: 1 },
+      actionMeta: {
+        dash: { label: 'Dash', color: '#c9a227' },
+        shield: { label: 'Shield', color: '#3d9e5f' },
+        super: { label: 'Super', color: '#7a5cff' },
+        hold: { label: 'Hold', color: '#5b6472' },
+      },
+      solution: [repeat(16, [fizzBuzzBeat()], 'Repeat 16×')],
       feedback: {
-        correct: 'Up on even, right on odd — the counter built a perfect staircase.',
+        correct: 'Nested If blocks caught the both-beats — that is FizzBuzz, solved with logic, not luck.',
         hints: [
-          'The count flips even/odd every move: 0, 1, 2, 3… so the If can pick a different direction each step.',
-          'Decide which move belongs on the even step and which on the odd, then count the moves to set the Repeat.',
+          'Beat 0 divides by BOTH 3 and 5 — that is the case a flat plan gets wrong.',
+          'Let one If ask its question inside a branch of the other, so the both-beat gets its own Super.',
+          'Set the Repeat to 16 so every beat from 0 to 15 is covered.',
         ],
       },
     },
     {
-      id: 'l6-q2',
+      id: 'c7-sweep',
       type: 'conditional',
       requiresConditional: false,
-      goal: 'Skip and collect',
-      prompt: 'A gem sits in the row, but you have no gem-sensor this time — only the step counter. Time your grab by the count, then carry the gem to the treasure and drop it.',
+      goal: 'Loop inside a loop',
+      prompt: 'The treasure is 8 steps to the right — but you get only ONE Right card and your Repeat can count no higher than 5. Nest a Repeat inside a Repeat to multiply your steps and reach it.',
       map: {
         rows: 1,
-        cols: 5,
-        start: { row: 0, col: 0 },
-        goal: { row: 0, col: 4 },
-        tasks: [{ from: { row: 0, col: 2 }, to: { row: 0, col: 4 }, label: 'the gem' }],
-      },
-      availableCommands: ['right', 'left'],
-      availableActions: ['pickup', 'drop'],
-      blocks: ['while', 'if'],
-      predicateOptions: [clearRight, ...evenOdd],
-      cardLimits: { right: 3, pickup: 1, drop: 1 },
-      initialProgram: [
-        whileClear('right', [
-          {
-            kind: 'conditional',
-            predicate: { sensor: 'counterEven' },
-            then: [],
-            else: [],
-            label: 'count is even',
-          } as Conditional,
-        ]),
-      ],
-      solution: [
-        'right',
-        whileClear('right', [
-          {
-            kind: 'conditional',
-            predicate: { sensor: 'counterEven' },
-            then: ['pickup', 'right'],
-            else: ['right'],
-            label: 'count is even',
-          } as Conditional,
-        ]),
-        'drop',
-      ],
-      feedback: {
-        correct: 'The counter landed even right on the gem — picked up without you counting tiles.',
-        hints: [
-          'A single step before the loop changes whether the count is even or odd when you reach the gem — work out the timing so the gem tile lines up.',
-          'Use that even/odd cue to fire Pick up on exactly the gem tile, then Drop once you reach the flag.',
-        ],
-      },
-    },
-    {
-      id: 'l6-q3',
-      type: 'conditional',
-      requiresConditional: false,
-      goal: 'Every third',
-      prompt: 'Climb to the treasure across an open field. There are no walls to feel for — the only thing you can sense is your step count. Work out the rule: how often must you turn upward instead of stepping forward? Then set the Repeat count to land exactly on the corner.',
-      map: {
-        rows: 4,
-        cols: 7,
-        start: { row: 3, col: 0 },
-        goal: { row: 0, col: 6 },
-      },
-      availableCommands: ['right', 'up'],
-      blocks: ['loop', 'if'],
-      predicateOptions: [divBy3, divBy5],
-      loopRange: { min: 1, max: 12 },
-      cardLimits: { right: 1, up: 1 },
-      initialProgram: [
-        repeat(
-          1,
-          [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'counterMod', divisor: 3, remainder: 0 },
-              then: [],
-              else: [],
-              label: 'count divides by 3',
-            } as Conditional,
-          ],
-          'Repeat 1×',
-        ),
-      ],
-      solution: [
-        repeat(
-          9,
-          [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'counterMod', divisor: 3, remainder: 0 },
-              then: ['up'],
-              else: ['right'],
-              label: 'count divides by 3',
-            } as Conditional,
-          ],
-          'Repeat 9×',
-        ),
-      ],
-      feedback: {
-        correct: 'One step up for every three — the counter drew a perfect slope to the corner.',
-        hints: [
-          'The field is open, so clear/blocked tell you nothing — only the step count matters.',
-          'Pick the divide-by rule that turns you upward at the right rhythm, then count the moves to set the Repeat.',
-        ],
-      },
-    },
-    {
-      id: 'l6-debug',
-      type: 'conditional',
-      requiresConditional: false,
-      goal: 'Debug: wrong rhythm',
-      prompt: 'This climber uses the right Repeat count and the right moves, but it picks the wrong rhythm — "count is even" makes it turn up far too often and it walks off the top. Read it, then change only the condition so it climbs at the correct pace and lands on the treasure.',
-      map: {
-        rows: 4,
-        cols: 7,
-        start: { row: 3, col: 0 },
-        goal: { row: 0, col: 6 },
-      },
-      availableCommands: ['right', 'up'],
-      blocks: ['loop', 'if'],
-      predicateOptions: [...evenOdd, divBy3],
-      loopRange: { min: 1, max: 12 },
-      cardLimits: { right: 1, up: 1 },
-      editableInitial: true,
-      initialProgram: [
-        repeat(
-          9,
-          [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'counterEven' },
-              then: ['up'],
-              else: ['right'],
-              label: 'count is even',
-            } as Conditional,
-          ],
-          'Repeat 9×',
-        ),
-      ],
-      solution: [
-        repeat(
-          9,
-          [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'counterMod', divisor: 3, remainder: 0 },
-              then: ['up'],
-              else: ['right'],
-              label: 'count divides by 3',
-            } as Conditional,
-          ],
-          'Repeat 9×',
-        ),
-      ],
-      feedback: {
-        correct: 'One up for every three, not every two — the right rhythm draws a clean slope to the corner.',
-        hints: [
-          '"Even" is true every other step — that climbs twice as fast as the slope needs.',
-          'Only the condition is wrong: leave the moves and count alone, and pick the divide-by rule whose rhythm matches one climb every few steps.',
-        ],
-      },
-    },
-    {
-      id: 'l6-q4',
-      type: 'conditional',
-      requiresConditional: false,
-      goal: 'Counter tiles boost',
-      prompt: 'The glowing tile in the middle boosts your count when you land on it. Use that to reach the treasure in the top-right corner.',
-      map: {
-        rows: 2,
-        cols: 5,
-        start: { row: 1, col: 0 },
-        goal: { row: 0, col: 4 },
-        counterTiles: [{ at: { row: 1, col: 2 }, bonus: 2 }],
-      },
-      availableCommands: ['right', 'up', 'down', 'left'],
-      blocks: ['while', 'if'],
-      predicateOptions: [clearUp, clearRight, divBy3],
-      cardLimits: { right: 2, up: 1 },
-      initialProgram: [
-        whileClear('up', [
-          {
-            kind: 'conditional',
-            predicate: { sensor: 'counterMod', divisor: 3, remainder: 0 },
-            then: [],
-            else: [],
-            label: 'count divides by 3',
-          } as Conditional,
-        ]),
-      ],
-      solution: [
-        'right',
-        whileClear('up', [
-          {
-            kind: 'conditional',
-            predicate: { sensor: 'counterMod', divisor: 3, remainder: 0 },
-            then: ['up'],
-            else: ['right'],
-            label: 'count divides by 3',
-          } as Conditional,
-        ]),
-      ],
-      feedback: {
-        correct: 'The +2 boost pushed "divides by 3" to the last column — so you climbed exactly onto the treasure.',
-        hints: [
-          'Scan while Up is clear so the loop stops once you reach the top row.',
-          'The glowing tile adds 2 to your count, so the divide-by-3 turn happens one column later than you\'d expect.',
-        ],
-      },
-    },
-    {
-      id: 'l6-q5',
-      type: 'conditional',
-      requiresConditional: false,
-      goal: 'Every fifth',
-      prompt: 'A wider open field, a gentler slope. Same idea as before, but the turn comes around less often. Sense only the step count, work out how often to climb, and set the Repeat to finish exactly on the treasure.',
-      map: {
-        rows: 3,
         cols: 9,
-        start: { row: 2, col: 0 },
+        start: { row: 0, col: 0 },
         goal: { row: 0, col: 8 },
       },
+      availableCommands: ['right'],
+      blocks: ['loop'],
+      loopRange: { min: 1, max: 5 },
+      cardLimits: { right: 1 },
+      solution: [repeat(4, [repeat(2, ['right'], 'Repeat 2×')], 'Repeat 4×')],
+      feedback: {
+        correct: 'A loop inside a loop multiplied your single Right card into eight steps. That is how nesting scales.',
+        hints: [
+          'One Right card can only stretch so far on its own — a loop inside a loop multiplies how many steps it makes.',
+          'Think of the distance as two numbers multiplied together, and let the outer loop run the inner one.',
+        ],
+      },
+    },
+    {
+      id: 'c7-climb',
+      type: 'conditional',
+      requiresConditional: false,
+      goal: 'Stairs by nesting',
+      prompt: 'Climb to the top-right corner. Each stair is one step Up then three steps Right — and the whole staircase repeats. You get only ONE Up card and ONE Right card, so nest a Repeat inside a Repeat to build the climb.',
+      map: {
+        rows: 4,
+        cols: 10,
+        start: { row: 3, col: 0 },
+        goal: { row: 0, col: 9 },
+      },
       availableCommands: ['right', 'up'],
-      blocks: ['loop', 'if'],
-      predicateOptions: [divBy3, divBy5],
-      loopRange: { min: 1, max: 14 },
+      blocks: ['loop'],
+      loopRange: { min: 1, max: 4 },
       cardLimits: { right: 1, up: 1 },
-      initialProgram: [
-        repeat(
-          1,
-          [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'counterMod', divisor: 5, remainder: 0 },
-              then: [],
-              else: [],
-              label: 'count divides by 5',
-            } as Conditional,
-          ],
-          'Repeat 1×',
-        ),
-      ],
       solution: [
-        repeat(
-          10,
-          [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'counterMod', divisor: 5, remainder: 0 },
-              then: ['up'],
-              else: ['right'],
-              label: 'count divides by 5',
-            } as Conditional,
-          ],
-          'Repeat 10×',
-        ),
+        repeat(3, ['up', repeat(3, ['right'], 'Repeat 3×')], 'Repeat 3×'),
       ],
       feedback: {
-        correct: 'One step up for every five — a longer stride between climbs, landing right on the treasure.',
+        correct: 'One stair, repeated three times — an outer loop running an inner loop built the whole climb.',
         hints: [
-          'The climbs come less often here than in the divide-by-3 puzzle — pick the divisor that matches this gentler slope.',
-          'Turn upward when the count hits that rhythm, otherwise step Right, then count the moves to set the Repeat.',
+          'A staircase is the same little step repeated — find the shape of one stair first.',
+          'Once you know one stair, work out how many stairs it takes to reach the top, and let the outer loop repeat them.',
+        ],
+      },
+    },
+    {
+      id: 'c7-binary',
+      type: 'concept',
+      title: 'Binary search',
+      body: 'How do you find a number in a sorted row without checking every tile? Keep a **range** of tiles it could be in. Each round: **Go to middle** of the range and read it, then throw away the half that cannot hold your number — **Discard lower half** if your target is higher, **Discard upper half** if it is lower. The range halves every round, so even a long row falls in just a few jumps. The greyed-out tiles show what you have ruled out.',
+    },
+    {
+      id: 'c7-search',
+      type: 'conditional',
+      requiresConditional: false,
+      goal: 'Binary search',
+      prompt: 'Find the hidden number without checking every tile. Keep going while you are still searching: jump to the middle of what is left, then throw away the half that cannot be hiding your number. Watch the greyed-out tiles — half the range should vanish on every guess.',
+      map: {
+        rows: 1,
+        cols: 7,
+        start: { row: 0, col: 0 },
+        goal: { row: 0, col: 6 },
+        targetValue: 60,
+        binarySearch: true,
+        numberTiles: [
+          { at: { row: 0, col: 0 }, value: 5 },
+          { at: { row: 0, col: 1 }, value: 11 },
+          { at: { row: 0, col: 2 }, value: 18 },
+          { at: { row: 0, col: 3 }, value: 26 },
+          { at: { row: 0, col: 4 }, value: 35 },
+          { at: { row: 0, col: 5 }, value: 47 },
+          { at: { row: 0, col: 6 }, value: 60 },
+        ],
+      },
+      availableCommands: [],
+      availableActions: ['toMiddle', 'discardLower', 'discardUpper'],
+      blocks: ['while', 'if'],
+      predicateOptions: [searching, numberHigher, numberLower],
+      cardLimits: { toMiddle: 1, discardLower: 1, discardUpper: 1 },
+      initialProgram: [
+        {
+          kind: 'while',
+          predicate: { sensor: 'targetNotFound' },
+          body: [
+            {
+              kind: 'conditional',
+              predicate: { sensor: 'targetHigher' },
+              then: [],
+              else: [],
+              label: 'the number is higher',
+            } as Conditional,
+          ],
+          label: 'still searching',
+        } as While,
+      ],
+      solution: [
+        {
+          kind: 'while',
+          predicate: { sensor: 'targetNotFound' },
+          body: [
+            'toMiddle',
+            {
+              kind: 'conditional',
+              predicate: { sensor: 'targetHigher' },
+              then: ['discardLower'],
+              else: ['discardUpper'],
+              label: 'the number is higher',
+            } as Conditional,
+          ],
+          label: 'still searching',
+        } as While,
+      ],
+      feedback: {
+        correct: 'That is real binary search! Every round you went to the middle and tossed half the tiles, so the whole row fell in about three jumps.',
+        hints: [
+          'Each round does two things in order: look at the middle tile, then rule out the half that cannot hold your number.',
+          'If your number is bigger than the middle tile, it must lie further along — so which half is safe to throw away?',
+        ],
+      },
+    },
+    {
+      id: 'c7-search2',
+      type: 'conditional',
+      requiresConditional: false,
+      goal: 'Search, the other way',
+      prompt: 'Same binary search, but the number is hiding low this time. The very same loop still works — jump to the middle and rule out the half that cannot hold your number — it just throws away the other side first.',
+      map: {
+        rows: 1,
+        cols: 7,
+        start: { row: 0, col: 6 },
+        goal: { row: 0, col: 0 },
+        targetValue: 4,
+        binarySearch: true,
+        numberTiles: [
+          { at: { row: 0, col: 0 }, value: 4 },
+          { at: { row: 0, col: 1 }, value: 9 },
+          { at: { row: 0, col: 2 }, value: 15 },
+          { at: { row: 0, col: 3 }, value: 22 },
+          { at: { row: 0, col: 4 }, value: 30 },
+          { at: { row: 0, col: 5 }, value: 40 },
+          { at: { row: 0, col: 6 }, value: 52 },
+        ],
+      },
+      availableCommands: [],
+      availableActions: ['toMiddle', 'discardLower', 'discardUpper'],
+      blocks: ['while', 'if'],
+      predicateOptions: [searching, numberHigher, numberLower],
+      cardLimits: { toMiddle: 1, discardLower: 1, discardUpper: 1 },
+      initialProgram: [
+        {
+          kind: 'while',
+          predicate: { sensor: 'targetNotFound' },
+          body: [
+            {
+              kind: 'conditional',
+              predicate: { sensor: 'targetHigher' },
+              then: [],
+              else: [],
+              label: 'the number is higher',
+            } as Conditional,
+          ],
+          label: 'still searching',
+        } as While,
+      ],
+      solution: [
+        {
+          kind: 'while',
+          predicate: { sensor: 'targetNotFound' },
+          body: [
+            'toMiddle',
+            {
+              kind: 'conditional',
+              predicate: { sensor: 'targetHigher' },
+              then: ['discardLower'],
+              else: ['discardUpper'],
+              label: 'the number is higher',
+            } as Conditional,
+          ],
+          label: 'still searching',
+        } as While,
+      ],
+      feedback: {
+        correct: 'Same binary search, mirror image — it tossed the upper half first and halved its way down to the number with no wasted guesses.',
+        hints: [
+          'Binary search does not care which side the number is on — the same loop you built before still works.',
+          'Compare the first middle tile to your target to see which half disappears on the opening guess.',
         ],
       },
     },

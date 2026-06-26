@@ -1,17 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { Action, Command, ConditionalStep, Instruction, Position, SequenceStep } from '../types'
-import { isAction } from '../types'
 import { getLesson, getNextLessonId } from '../content/registry'
 import { useLearner } from '../context/LearnerContext'
 import { checkProgram } from '../engine/checker'
 import type { ProgramSpec } from '../engine/checker'
 import { checkpointsVisitedInOrder, carryFrames, runInstructions, gateStatesAt, keysCollectedAt } from '../engine/map'
-import type { SearchWindow } from '../engine/map'
+import type { SearchWindow, RunResult } from '../engine/map'
 import { resumeStepId } from '../storage/progress'
+import { aiExplainEnabled, aiGenerationEnabled } from '../ai/config'
+import { getExplanation } from '../ai/explain'
+import { ensurePrefetchDepth, PREFETCH_QUEUE_DEPTH } from '../ai/practicePrefetch'
+import { generatePuzzle } from '../ai/generation'
+import { conceptForLesson, buildPracticeTemplate } from '../content/generated'
+import { nextDifficultyDirection } from '../adaptivity/difficulty'
+import { lessonSuccessRate } from '../adaptivity/mastery'
 import { MapGrid } from '../components/MapGrid'
 import { CommandSequence } from '../components/CommandSequence'
 import type { ProgramNode, PaletteItem } from '../components/CommandSequence'
+import { nodeToInstruction, instructionToNode } from '../components/programNodes'
 import { BirdGuide, type BirdMood } from '../components/BirdGuide'
 import { FormattedText } from '../components/FormattedText'
 import { Confetti } from '../components/Confetti'
@@ -19,6 +26,7 @@ import { SoundToggle } from '../components/SoundToggle'
 import { FlameIcon, CheckCircleIcon, LightbulbIcon, BadgeIcon, CompassIcon } from '../components/icons'
 import { pickHint } from '../lib/hints'
 import { playSound } from '../lib/sound'
+import { BeatPuzzle } from '../components/BeatPuzzle'
 
 const STEP_MS = 260
 
@@ -59,25 +67,6 @@ function buildPalette(step: PlayStep): PaletteItem[] {
   return [...moves, ...actions, ...blocks]
 }
 
-// Converts the editor's node tree into runnable instructions.
-function nodeToInstruction(node: ProgramNode): Instruction {
-  if (node.kind === 'move') return node.command
-  if (node.kind === 'action') return node.action
-  if (node.kind === 'loop') {
-    return { kind: 'loop', count: node.count, body: node.body.map(nodeToInstruction), label: `Repeat ${node.count}×` }
-  }
-  if (node.kind === 'while') {
-    return { kind: 'while', predicate: node.predicate, body: node.body.map(nodeToInstruction), label: node.predicateLabel }
-  }
-  return {
-    kind: 'conditional',
-    predicate: node.predicate,
-    then: node.then.map(nodeToInstruction),
-    else: node.else.map(nodeToInstruction),
-    label: node.predicateLabel,
-  }
-}
-
 function isProgramNodeArray(value: unknown): value is ProgramNode[] {
   return (
     Array.isArray(value) &&
@@ -87,29 +76,6 @@ function isProgramNodeArray(value: unknown): value is ProgramNode[] {
 
 function restoreProgram(saved: unknown): ProgramNode[] {
   return isProgramNodeArray(saved) ? (saved as ProgramNode[]) : []
-}
-
-function instructionToNode(inst: Instruction, locked = false): ProgramNode {
-  const id = Math.random().toString(36).slice(2)
-  if (typeof inst === 'string') {
-    if (isAction(inst)) return { id, locked: locked || undefined, kind: 'action', action: inst }
-    return { id, locked: locked || undefined, kind: 'move', command: inst as Command }
-  }
-  if (inst.kind === 'loop') {
-    return { id, locked: locked || undefined, kind: 'loop', count: inst.count, body: inst.body.map((b) => instructionToNode(b, locked)) }
-  }
-  if (inst.kind === 'while') {
-    return { id, locked: locked || undefined, kind: 'while', predicate: inst.predicate, predicateLabel: inst.label, body: inst.body.map((b) => instructionToNode(b, locked)) }
-  }
-  return {
-    id,
-    locked: locked || undefined,
-    kind: 'if',
-    predicate: inst.predicate,
-    predicateLabel: inst.label,
-    then: inst.then.map((b) => instructionToNode(b, locked)),
-    else: inst.else.map((b) => instructionToNode(b, locked)),
-  }
 }
 
 function specForStep(step: PlayStep): ProgramSpec {
@@ -134,6 +100,10 @@ export function LessonPage() {
 
   const stateRef = useRef(state)
   stateRef.current = state
+
+  // Background prefetch guard: ensures we only kick off the first practice
+  // puzzle generation once per lesson (single-flight at the trigger site).
+  const prefetchedLessonRef = useRef<string | null>(null)
 
   const [stepIndex, setStepIndex] = useState(0)
   const [program, setProgram] = useState<ProgramNode[]>([])
@@ -161,6 +131,10 @@ export function LessonPage() {
     status: 'correct' | 'incorrect'
     message: string
   } | null>(null)
+  // P0 AI: the last failed attempt, plus the on-demand explanation state.
+  const [lastAttempt, setLastAttempt] = useState<{ run: RunResult; instructions: Instruction[] } | null>(null)
+  const [explainText, setExplainText] = useState<string | null>(null)
+  const [explainLoading, setExplainLoading] = useState(false)
 
   const timers = useRef<number[]>([])
   const feedbackRef = useRef<HTMLDivElement>(null)
@@ -194,6 +168,9 @@ export function LessonPage() {
     setFacing('right')
     setFeedback(null)
     setManualHintLevel(0)
+    setLastAttempt(null)
+    setExplainText(null)
+    setExplainLoading(false)
     setCheckpointsDelivered(0)
     setTaskPicked(0)
     setTaskDropped(0)
@@ -221,6 +198,28 @@ export function LessonPage() {
     if (lesson && currentStep) {
       setCurrentStep(lesson.id, currentStep.id)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lesson, stepIndex])
+
+  // Once the learner crosses the halfway point of the lesson, warm up the first
+  // "Keep practicing" puzzle in the background so the PracticePage can serve it
+  // instantly. Fires at most once per lesson; ensurePrefetch is single-flight and
+  // its promise never rejects, so the request function only needs to avoid throwing.
+  useEffect(() => {
+    if (!lesson || !aiGenerationEnabled) return
+    if (conceptForLesson(lesson) === null) return
+    if (stepIndex < Math.floor(lesson.steps.length / 2)) return
+    if (prefetchedLessonRef.current === lesson.id) return
+    prefetchedLessonRef.current = lesson.id
+    ensurePrefetchDepth(lesson.id, () => {
+      const learnerState = state ?? stateRef.current
+      const rate = learnerState ? lessonSuccessRate(learnerState, lesson.skillIds) : null
+      const direction = nextDifficultyDirection(rate)
+      const template = buildPracticeTemplate(lesson, { direction })
+      return template ? generatePuzzle(template) : Promise.resolve(null)
+    }, PREFETCH_QUEUE_DEPTH)
+    // Fire once per lesson when halfway is crossed; `state` is read fresh inside
+    // and intentionally excluded so this does not re-run on every state change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lesson, stepIndex])
 
@@ -279,6 +278,9 @@ export function LessonPage() {
     setSearchWindow(null)
     setCelebrate(false)
     setFeedback(null)
+    setLastAttempt(null)
+    setExplainText(null)
+    setExplainLoading(false)
   }
 
   function handleProgramChange(next: ProgramNode[]) {
@@ -335,6 +337,35 @@ export function LessonPage() {
     }
   }
 
+  async function handleExplain() {
+    if (!currentStep || (currentStep.type !== 'sequence' && currentStep.type !== 'conditional')) return
+    if (!lastAttempt || explainLoading) return
+    const step = currentStep
+    const spec = specForStep(step)
+    setExplainLoading(true)
+    playSound('click')
+    try {
+      const res = await getExplanation({
+        stepId: step.id,
+        goal: step.goal,
+        map: step.map,
+        successRule: spec.successRule,
+        optimal: spec.optimal,
+        instructions: lastAttempt.instructions,
+        run: lastAttempt.run,
+        solution: step.solution,
+        authoredHints: step.feedback.hints,
+        priorFailCount: priorFails,
+      })
+      setExplainText(res.text)
+    } finally {
+      setExplainLoading(false)
+    }
+    if (feedbackRef.current) {
+      feedbackRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }
+
   function handleRun() {
     if (!currentStep || (currentStep.type !== 'sequence' && currentStep.type !== 'conditional') || animating) return
     const step = currentStep
@@ -345,6 +376,8 @@ export function LessonPage() {
     setCrashed(false)
     setSolved(false)
     setFeedback(null)
+    setExplainText(null)
+    setExplainLoading(false)
     setGhostPath(null)
     setGhostStep(0)
     setActiveTile(result.run.path[0])
@@ -431,8 +464,10 @@ export function LessonPage() {
         playSound(result.correct ? 'success' : 'error')
         if (result.correct) {
           setFeedback({ status: 'correct', message: result.message })
+          setLastAttempt(null)
         } else {
           setFeedback({ status: 'incorrect', message: result.message })
+          setLastAttempt({ run: result.run, instructions })
         }
         recordResult(lesson, step.id, result.correct, result.run.executed)
         if (feedbackRef.current) {
@@ -502,6 +537,11 @@ export function LessonPage() {
             ) : (
               <p className="text-muted">You completed every lesson. Amazing!</p>
             )}
+            {aiGenerationEnabled && (
+              <Link to={`/practice/${lesson.id}`} onClick={() => playSound('click')} className="btn-ghost">
+                Keep practicing
+              </Link>
+            )}
             <Link to="/app" onClick={() => playSound('click')} className="btn-ghost">
               Back to course
             </Link>
@@ -512,6 +552,14 @@ export function LessonPage() {
   }
 
   function birdForPlayStep(step: PlayStep): { message: string; mood: BirdMood } {
+    // Rico himself delivers the AI explanation: a brief "thinking" line while it
+    // loads, then the tailored explanation in his speech bubble.
+    if (explainLoading) {
+      return { message: 'Hmm, let me look at the moves you used…', mood: 'explain' }
+    }
+    if (explainText) {
+      return { message: explainText, mood: 'oops' }
+    }
     if (feedback?.status === 'correct') {
       return { message: feedback.message, mood: 'celebrate' }
     }
@@ -615,6 +663,18 @@ export function LessonPage() {
                   {ghostPlaying ? 'Watch closely…' : 'Watch Rico show you'}
                 </button>
               )}
+              {aiExplainEnabled && feedback?.status === 'incorrect' && lastAttempt && (
+                <button
+                  type="button"
+                  onClick={handleExplain}
+                  disabled={explainLoading || animating || ghostPlaying}
+                  className="btn-hint"
+                  aria-label="Ask Rico to explain my mistake"
+                >
+                  <CompassIcon className="h-4 w-4" />
+                  {explainLoading ? 'Thinking…' : 'Explain my mistake'}
+                </button>
+              )}
             </div>
           </aside>
 
@@ -695,6 +755,18 @@ export function LessonPage() {
             </div>
           </div>
         </section>
+      )}
+
+      {currentStep && currentStep.type === 'beat' && (
+        <BeatPuzzle
+          step={currentStep}
+          savedProgram={state?.lessonProgress[lesson.id]?.savedPrograms[currentStep.id]}
+          onProgramChange={(p) => saveProgram(lesson.id, currentStep.id, p)}
+          onResult={(correct) => recordResult(lesson, currentStep.id, correct, [])}
+          onNext={goNext}
+          priorFailCount={state?.stepStats[currentStep.id]?.incorrect ?? 0}
+          isLastStep={stepIndex + 1 >= totalSteps}
+        />
       )}
     </div>
   )

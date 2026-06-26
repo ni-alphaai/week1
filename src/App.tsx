@@ -11,6 +11,7 @@ import { AuthPage } from './pages/AuthPage'
 const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })))
 const CoursePage = lazy(() => import('./pages/CoursePage').then((m) => ({ default: m.CoursePage })))
 const LessonPage = lazy(() => import('./pages/LessonPage').then((m) => ({ default: m.LessonPage })))
+const PracticePage = lazy(() => import('./pages/PracticePage').then((m) => ({ default: m.PracticePage })))
 const ParentPage = lazy(() => import('./pages/ParentPage').then((m) => ({ default: m.ParentPage })))
 
 function AppRoutes() {
@@ -23,6 +24,7 @@ function AppRoutes() {
         <Route path="/app" element={<HomePage />} />
         <Route path="/course" element={<CoursePage />} />
         <Route path="/lesson/:lessonId" element={<LessonPage />} />
+        <Route path="/practice/:lessonId" element={<PracticePage />} />
         <Route path="/parent" element={<ParentPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

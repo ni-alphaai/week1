@@ -4,7 +4,7 @@ import { useLearner } from '../context/LearnerContext'
 import { useAuth } from '../context/AuthContext'
 import { course, getLesson, listLessons } from '../content/registry'
 import { courseCompletionPercent, nextRecommendedLessonId } from '../storage/progress'
-import { FlameIcon, CompassIcon, PackageIcon, LightbulbIcon, GemIcon, BadgeIcon, TrashIcon } from '../components/icons'
+import { FlameIcon, CompassIcon, PackageIcon, LightbulbIcon, GemIcon, TrashIcon } from '../components/icons'
 import { RicoBird } from '../components/RicoBird'
 import { ProgressRing } from '../components/ProgressRing'
 import { SoundToggle } from '../components/SoundToggle'
@@ -161,7 +161,6 @@ function HomeDashboard() {
       : `Hi ${name}! I'm Rico. Let's learn to code together!`
   const cta = finished ? 'Review the course' : started ? 'Continue learning' : 'Start the adventure'
   const mood = finished ? 'celebrate' : 'explain'
-  const hasMasterBadge = state?.badges?.includes('master-coder') ?? false
 
   function openCourse() {
     playSound('click')
@@ -196,11 +195,6 @@ function HomeDashboard() {
         <RicoBird mood={mood} className="home-banner__bird" onClick={() => {}} />
         <div className="home-banner__text">
           <p className="home-banner__greeting">{greeting}</p>
-          {hasMasterBadge && (
-            <span className="badge-chip mt-2">
-              <BadgeIcon className="h-4 w-4" /> Master Coder
-            </span>
-          )}
         </div>
         <ProgressRing percent={percent} className="home-banner__ring" size={72} stroke={8} />
       </section>

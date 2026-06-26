@@ -53,7 +53,7 @@ export interface LearnerState {
   stepStats: Record<string, StepStat>
   streak: StreakState
   portfolio: PortfolioArtifact[]
-  /** Earned achievement ids (e.g. 'master-coder'). */
+  /** Earned achievement ids (e.g. 'algorithm-ace'). */
   badges: string[]
 }
 

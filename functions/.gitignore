@@ -1,0 +1,7 @@
+node_modules/
+lib/
+
+# Local secrets for the functions emulator (never commit real keys).
+.env
+.env.*
+.runtimeconfig.json

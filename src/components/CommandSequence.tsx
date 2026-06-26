@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Action, Command, Predicate, PredicateOption } from '../types'
-import { ArrowIcon, CompassIcon, DropIcon, PickupIcon } from './icons'
+import { ArrowIcon, CompassIcon, DropIcon, PickupIcon, DashIcon, ShieldIcon, SparkleIcon, HoldIcon } from './icons'
 import { playSound } from '../lib/sound'
 
 export type { PredicateOption }
@@ -40,6 +40,10 @@ const ACTION_LABEL: Record<Action, string> = {
   toMiddle: 'Go to middle',
   discardLower: 'Discard lower half',
   discardUpper: 'Discard upper half',
+  dash: 'Dash',
+  shield: 'Shield',
+  super: 'Super',
+  hold: 'Hold',
 }
 const DRAG_THRESHOLD_PX = 6
 
@@ -253,6 +257,14 @@ function ActionIcon({ action, className }: { action: Action; className?: string 
       return <ArrowIcon command="right" className={className} />
     case 'discardUpper':
       return <ArrowIcon command="left" className={className} />
+    case 'dash':
+      return <DashIcon className={className} />
+    case 'shield':
+      return <ShieldIcon className={className} />
+    case 'super':
+      return <SparkleIcon className={className} />
+    case 'hold':
+      return <HoldIcon className={className} />
   }
 }
 

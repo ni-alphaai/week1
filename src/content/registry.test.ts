@@ -51,8 +51,8 @@ function isPlainMoveStep(step: LessonStep): boolean {
 }
 
 describe('course registry', () => {
-  it('exposes seven lessons in the declared order', () => {
-    expect(course.lessonOrder).toHaveLength(7)
+  it('exposes six lessons in the declared order', () => {
+    expect(course.lessonOrder).toHaveLength(6)
     expect(listLessons().map((l) => l.id)).toEqual(course.lessonOrder)
   })
 
@@ -68,8 +68,8 @@ describe('course registry', () => {
 
   it('links lessons into a chain and ends with null', () => {
     expect(getNextLessonId(course.lessonOrder[0])).toBe(course.lessonOrder[1])
-    expect(getNextLessonId(course.lessonOrder[5])).toBe(course.lessonOrder[6])
-    expect(getNextLessonId(course.lessonOrder[6])).toBeNull()
+    expect(getNextLessonId(course.lessonOrder[4])).toBe(course.lessonOrder[5])
+    expect(getNextLessonId(course.lessonOrder[5])).toBeNull()
     expect(getNextLessonId('nope')).toBeNull()
   })
 })

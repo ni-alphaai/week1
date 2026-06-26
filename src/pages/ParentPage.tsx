@@ -17,8 +17,6 @@ const SKILL_LABELS: Record<string, string> = {
 
 const BADGE_LABELS: Record<string, string> = {
   'combo-coder': 'Combo Coder',
-  'master-coder': 'Master Coder',
-  'counter-coder': 'Counter Coder',
   'algorithm-ace': 'Algorithm Ace',
 }
 

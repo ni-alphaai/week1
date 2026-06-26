@@ -112,6 +112,43 @@ export function CompassIcon({ className }: { className?: string }) {
   )
 }
 
+export function SparkleIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <path
+        d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8z"
+        fill="currentColor"
+      />
+      <path d="M18.5 14l.8 2.2L21.5 17l-2.2.8-.8 2.2-.8-2.2L15.5 17l2.2-.8z" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function DashIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <path d="M13 2L4 14h6l-1 8 9-12h-6z" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function ShieldIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <path d="M12 2l8 3v6c0 5-3.4 9-8 11-4.6-2-8-6-8-11V5z" fill="none" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  )
+}
+
+export function HoldIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <rect x="7" y="6" width="3.2" height="12" rx="1" fill="currentColor" />
+      <rect x="13.8" y="6" width="3.2" height="12" rx="1" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function LightbulbIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className} aria-hidden="true">

@@ -3,9 +3,25 @@
 
 export type Command = 'up' | 'down' | 'left' | 'right'
 
+// Beat actions: emitted once per beat in the "Dodge the Beat" rhythm puzzles.
+export type BeatAction = 'dash' | 'shield' | 'super' | 'hold'
+
 // Action cards do something other than a plain move: carry an item
-// (pickup/drop) or drive a binary search (toMiddle/discardLower/discardUpper).
-export type Action = 'pickup' | 'drop' | 'toMiddle' | 'discardLower' | 'discardUpper'
+// (pickup/drop), drive a binary search (toMiddle/discardLower/discardUpper), or
+// react on a beat (dash/shield/super/hold).
+export type Action =
+  | 'pickup'
+  | 'drop'
+  | 'toMiddle'
+  | 'discardLower'
+  | 'discardUpper'
+  | BeatAction
+
+const BEAT_ACTIONS: readonly BeatAction[] = ['dash', 'shield', 'super', 'hold']
+
+export function isBeatAction(step: Step): step is BeatAction {
+  return (BEAT_ACTIONS as readonly string[]).includes(step)
+}
 
 // A single executable step in a program: a move or an action.
 export type Step = Command | Action
@@ -16,7 +32,8 @@ export function isAction(step: Step): step is Action {
     step === 'drop' ||
     step === 'toMiddle' ||
     step === 'discardLower' ||
-    step === 'discardUpper'
+    step === 'discardUpper' ||
+    isBeatAction(step)
   )
 }
 
@@ -216,6 +233,10 @@ export interface SequenceStep {
    * locked scaffold) — used by "fix the bug" debugging puzzles.
    */
   editableInitial?: boolean
+  /** True for puzzles produced by verified AI generation (P1). */
+  aiGenerated?: boolean
+  /** Optional difficulty hint (e.g. the solver's optimal move count) for adaptive selection. */
+  difficulty?: number
 }
 
 export interface ConditionalStep {
@@ -249,7 +270,47 @@ export interface ConditionalStep {
   requiresConditional?: boolean
 }
 
-export type LessonStep = ConceptStep | SequenceStep | ConditionalStep
+// A rule mapping a runtime predicate (evaluated with the beat count) to the
+// action the learner must emit on that beat. Rules are first-match wins.
+export interface BeatRule {
+  predicate: Predicate
+  action: BeatAction
+}
+
+// "Dodge the Beat": the count ticks 0..count-1 and the learner programs the
+// action emitted on each beat (nested Ifs + a loop). The required action per
+// beat comes from `rules` (first match) or `defaultAction` otherwise.
+export interface BeatStep {
+  id: string
+  type: 'beat'
+  goal: string
+  prompt: string
+  /** How many beats the run lasts (counts 0..count-1). */
+  count: number
+  /** Required-action rules, first-match wins. The "subject logic" verified against. */
+  rules: BeatRule[]
+  /** Action required when no rule matches. */
+  defaultAction: BeatAction
+  /** Action cards offered in the palette. */
+  availableActions: BeatAction[]
+  /** Composable container blocks offered (Repeat / If). */
+  blocks?: BlockKind[]
+  /** Condition choices for while/if blocks (e.g. divides-by-3, divides-by-5). */
+  predicateOptions?: PredicateOption[]
+  /** Allowed count range for for-loops. */
+  loopRange?: { min: number; max: number }
+  /** Per-card placement limits. */
+  cardLimits?: CardLimits
+  feedback: StepFeedback
+  /** A verified solution program (emits the expected action on every beat). */
+  solution: Instruction[]
+  initialProgram?: Instruction[]
+  editableInitial?: boolean
+  /** Display label + accent color per action, for the lane and cards. */
+  actionMeta?: Partial<Record<BeatAction, { label: string; color?: string }>>
+}
+
+export type LessonStep = ConceptStep | SequenceStep | ConditionalStep | BeatStep
 
 // An achievement awarded when a lesson is completed for the first time.
 export interface Badge {
@@ -283,4 +344,8 @@ export function isSequenceStep(step: LessonStep): step is SequenceStep {
 
 export function isConditionalStep(step: LessonStep): step is ConditionalStep {
   return step.type === 'conditional'
+}
+
+export function isBeatStep(step: LessonStep): step is BeatStep {
+  return step.type === 'beat'
 }

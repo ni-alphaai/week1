@@ -478,10 +478,6 @@ export function checkpointsVisitedInOrder(path: Position[], checkpoints: Positio
   return next
 }
 
-export function allCheckpointsVisited(path: Position[], checkpoints: Position[]): boolean {
-  return checkpoints.length === 0 || checkpointsVisitedInOrder(path, checkpoints) === checkpoints.length
-}
-
 // Gate open/closed state from the map's starting config.
 export function initialGateStates(map: MapConfig): Record<string, boolean> {
   const gates: Record<string, boolean> = {}

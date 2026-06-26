@@ -1,4 +1,5 @@
 import type { Conditional, Instruction, Lesson, Loop, While } from '../../types'
+import { emptyConditional, emptyWhile, loopWithEmptyIf, whileWithEmptyIf } from '../scaffolds'
 
 // If a wall is on the right, climb over it; otherwise just step right.
 const hopRight = (): Conditional => ({
@@ -6,6 +7,15 @@ const hopRight = (): Conditional => ({
   predicate: { sensor: 'blocked', dir: 'right' },
   then: ['up', 'right', 'right', 'down'],
   else: ['right'],
+  label: 'wall on the right',
+})
+
+// One-time hop over a single rock — used before a While, not inside a Repeat.
+const hopOnce = (): Conditional => ({
+  kind: 'conditional',
+  predicate: { sensor: 'blocked', dir: 'right' },
+  then: ['up', 'right', 'right', 'down'],
+  else: [],
   label: 'wall on the right',
 })
 
@@ -18,11 +28,33 @@ const stairStep = (): Conditional => ({
   label: 'Right is clear',
 })
 
+// Grab a gem the moment you step on it; otherwise keep marching.
+const grabOrMarch = (): Conditional => ({
+  kind: 'conditional',
+  predicate: { sensor: 'atGem' },
+  then: ['pickup'],
+  else: ['right'],
+  label: 'standing on a gem',
+})
+
+// A pillar blocks the climb — sidestep right, then keep going up.
+const climbAround = (): Conditional => ({
+  kind: 'conditional',
+  predicate: { sensor: 'blocked', dir: 'up' },
+  then: ['right'],
+  else: ['up'],
+  label: 'wall above',
+})
+
 const loopRange = { min: 1, max: 9 }
+const wallOnRight = [{ predicate: { sensor: 'blocked', dir: 'right' }, label: 'wall on the right' }]
+const clearRight = [{ predicate: { sensor: 'clear', dir: 'right' }, label: 'Right is clear' }]
+const atGemOption = [{ predicate: { sensor: 'atGem' }, label: 'standing on a gem' }]
+const wallAbove = [{ predicate: { sensor: 'blocked', dir: 'up' }, label: 'wall above' }]
 
 export const lesson2: Lesson = {
   id: 'lesson-4-if-else',
-  version: 5,
+  version: 8,
   title: 'If / Else',
   subtitle: 'Sense the world and let the explorer choose its own path.',
   sequence: 4,
@@ -32,13 +64,14 @@ export const lesson2: Lesson = {
       id: 'l2-intro',
       type: 'concept',
       title: 'Let the explorer decide',
-      body: 'An **if / else** block senses something right now — a wall, a gem — and picks a path. Put it **inside a loop** and that choice repeats every step, so the explorer can handle a world it cannot predict.',
+      body: 'An **if / else** block senses something right now — a wall, a gem — and picks a path. Put it **inside a loop** and that choice repeats every step, so the explorer can handle a world it cannot predict.\n\nEach puzzle uses a **different program shape**: a repeating rule, a one-shot choice, a while-loop combo, or a gem pickup.',
     },
     {
       id: 'l2-q1',
       type: 'conditional',
+      requiresConditional: true,
       goal: 'Through the gauntlet',
-      prompt: 'Rocks block the corridor — and next time they could sit anywhere. Teach the explorer one rule that handles a rock wherever it appears, and reach the treasure.',
+      prompt: 'Rocks block the corridor — and next time they could sit anywhere. Teach the explorer one rule that hops over a rock when it meets one, and reach the treasure.',
       map: {
         rows: 2,
         cols: 8,
@@ -48,26 +81,11 @@ export const lesson2: Lesson = {
       },
       availableCommands: ['right', 'up', 'down'],
       blocks: ['loop', 'if'],
-      predicateOptions: [
-        { predicate: { sensor: 'blocked', dir: 'right' }, label: 'wall on the right' },
-      ],
+      predicateOptions: wallOnRight,
       loopRange,
       cardLimits: { right: 3, up: 1, down: 1 },
       initialProgram: [
-        {
-          kind: 'loop',
-          count: 1,
-          body: [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'blocked', dir: 'right' },
-              then: [],
-              else: [],
-              label: 'wall on the right',
-            } as Instruction,
-          ],
-          label: 'Repeat 1×',
-        } as Loop,
+        loopWithEmptyIf(1, { sensor: 'blocked', dir: 'right' }, 'wall on the right'),
       ],
       solution: [
         {
@@ -88,70 +106,47 @@ export const lesson2: Lesson = {
     {
       id: 'l2-q2',
       type: 'conditional',
-      goal: 'Flip the switch',
-      prompt: 'A sliding gate blocks the corridor, and the switch above it slides the gate open. Find your way past the gate to the treasure.',
+      requiresConditional: true,
+      goal: 'Collect on contact',
+      prompt: 'A gem sits in the corridor and the treasure is at the far end. You only get one Pick up card — teach the explorer to grab the gem the instant it steps on it, then march on and deliver it.',
       map: {
         rows: 2,
-        cols: 5,
+        cols: 8,
         start: { row: 1, col: 0 },
-        goal: { row: 1, col: 4 },
-        gates: [{ id: 'g1', at: { row: 1, col: 2 }, open: false }],
-        plates: [{ at: { row: 0, col: 2 }, gateId: 'g1', mode: 'open' }],
+        goal: { row: 1, col: 7 },
+        tasks: [{ from: { row: 1, col: 3 }, to: { row: 1, col: 7 }, label: 'the gem' }],
       },
-      availableCommands: ['right', 'up', 'down'],
+      availableCommands: ['right'],
+      availableActions: ['pickup', 'drop'],
       blocks: ['loop', 'if'],
-      predicateOptions: [
-        { predicate: { sensor: 'blocked', dir: 'right' }, label: 'wall on the right' },
-      ],
+      predicateOptions: atGemOption,
       loopRange,
-      cardLimits: { right: 2, up: 1, down: 1 },
+      cardLimits: { right: 1, pickup: 1, drop: 1 },
       initialProgram: [
-        {
-          kind: 'loop',
-          count: 1,
-          body: [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'blocked', dir: 'right' },
-              then: [],
-              else: [],
-              label: 'wall on the right',
-            } as Instruction,
-          ],
-          label: 'Repeat 1×',
-        } as Loop,
+        loopWithEmptyIf(1, { sensor: 'atGem' }, 'standing on a gem'),
       ],
       solution: [
         {
           kind: 'loop',
-          count: 4,
-          body: [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'blocked', dir: 'right' },
-              then: ['up', 'right', 'down'],
-              else: ['right'],
-              label: 'wall on the right',
-            } as Conditional,
-          ],
-          label: 'Repeat 4×',
+          count: 8,
+          body: [grabOrMarch()],
+          label: 'Repeat 8×',
         } as Loop,
+        'drop',
       ],
       feedback: {
-        correct: 'The If detoured over the switch the moment it met the gate — then strolled through the open way.',
+        correct: 'Standing on a gem? Pick it up. Path clear? March on. One rule handled the whole delivery.',
         hints: [
-          'When the gate blocks the way right, detour up over it — the switch waiting up there slides the gate open as you pass; when the way is clear, just step ahead.',
-          'Count how many times the If block has to run to carry you from start to goal — that is your Repeat number.',
+          'The If should check whether the explorer is standing on the gem right now — not whether one is nearby.',
+          'After the loop reaches the drop-off tile, play Drop once to finish the job.',
         ],
       },
     },
     {
       id: 'l2-q3',
       type: 'conditional',
+      requiresConditional: true,
       goal: 'Staircase run',
-      // Map: 4×5 with an UNEVEN staircase (run lengths 1, 2, 1) so no fixed
-      // pattern works — the explorer must sense right-vs-up at every step.
-      // Walls at (3,2),(2,4). Path: R(3,1) U(2,1) R(2,2) R(2,3) U(1,3) R(1,4) U(0,4)=goal.
       prompt: 'The steps of this staircase are uneven, so a fixed pattern will not work — the explorer has to feel its way. Build a rule that steps Right when the path ahead is open and Up when a wall blocks it.',
       map: {
         rows: 4,
@@ -166,14 +161,14 @@ export const lesson2: Lesson = {
         { predicate: { sensor: 'clear', dir: 'up' }, label: 'Up is clear' },
         { predicate: { sensor: 'clear', dir: 'right' }, label: 'Right is clear' },
       ],
-      cardLimits: { right: 1, up: 1 },
+      cardLimits: { right: 1, up: 1, while: 1, if: 1 },
       initialProgram: [
-        {
-          kind: 'while',
-          predicate: { sensor: 'clear', dir: 'up' },
-          body: [],
-          label: 'Up is clear',
-        } as Instruction,
+        whileWithEmptyIf(
+          { sensor: 'clear', dir: 'up' },
+          'Up is clear',
+          { sensor: 'clear', dir: 'right' },
+          'Right is clear',
+        ),
       ],
       solution: [
         {
@@ -194,6 +189,7 @@ export const lesson2: Lesson = {
     {
       id: 'l2-debug',
       type: 'conditional',
+      requiresConditional: true,
       goal: 'Debug: spot the swap',
       prompt: 'This staircase climber looks right, but the two branches of the If are swapped — so it climbs straight up the wall and never reaches the treasure. Read it, then swap the branches so it steps Right when the path is clear and Up when it is blocked.',
       map: {
@@ -246,113 +242,75 @@ export const lesson2: Lesson = {
     {
       id: 'l2-q4',
       type: 'conditional',
-      goal: 'Long staircase',
-      // 5×6 map, start (4,0), goal (0,5). UNEVEN steps (runs 2,0,1,2 with a
-      // double-up) so only sense-and-step works, never a fixed repeat.
-      // Walls at (4,3),(3,3),(2,4).
-      // Path: R(4,1) R(4,2) U(3,2) U(2,2) R(2,3) U(1,3) R(1,4) R(1,5) U(0,5)=goal.
-      prompt: 'A longer, more jagged staircase — some steps are tall, some are wide. Let the explorer feel each one: Right when it can, Up when a wall is in the way.',
+      requiresConditional: true,
+      goal: 'Hop once, march on',
+      prompt: 'One rock blocks the corridor right at the start — hop over it once. After that the path is clear for ages, so let a While loop march the rest of the way.',
       map: {
-        rows: 5,
-        cols: 6,
-        start: { row: 4, col: 0 },
-        goal: { row: 0, col: 5 },
-        obstacles: [{ row: 4, col: 3 }, { row: 3, col: 3 }, { row: 2, col: 4 }],
+        rows: 2,
+        cols: 10,
+        start: { row: 1, col: 0 },
+        goal: { row: 1, col: 9 },
+        obstacles: [{ row: 1, col: 1 }],
       },
-      availableCommands: ['right', 'up'],
-      blocks: ['while', 'if'],
-      predicateOptions: [
-        { predicate: { sensor: 'clear', dir: 'up' }, label: 'Up is clear' },
-        { predicate: { sensor: 'clear', dir: 'right' }, label: 'Right is clear' },
-      ],
-      cardLimits: { right: 1, up: 1 },
+      availableCommands: ['right', 'up', 'down'],
+      blocks: ['if', 'while'],
+      predicateOptions: [...wallOnRight, ...clearRight],
+      cardLimits: { right: 3, up: 1, down: 1, if: 1, while: 1 },
       initialProgram: [
-        {
-          kind: 'while',
-          predicate: { sensor: 'clear', dir: 'up' },
-          body: [],
-          label: 'Up is clear',
-        } as Instruction,
+        emptyConditional({ sensor: 'blocked', dir: 'right' }, 'wall on the right'),
+        emptyWhile({ sensor: 'clear', dir: 'right' }, 'Right is clear'),
       ],
       solution: [
+        hopOnce(),
         {
           kind: 'while',
-          predicate: { sensor: 'clear', dir: 'up' },
-          body: [stairStep()],
-          label: 'Up is clear',
+          predicate: { sensor: 'clear', dir: 'right' },
+          body: ['right'],
+          label: 'Right is clear',
         } as While,
       ],
       feedback: {
-        correct: 'Longer staircase, same rule — right when clear, up when not. The loop handled every step.',
+        correct: 'One If for the rock at the door, one While for the long open run — not every problem needs a Repeat.',
         hints: [
-          'The While keeps running while up is clear. The If inside decides right or up each step.',
-          'Match each branch to the rule in the goal: one direction when the way is clear, the other when it is blocked.',
+          'The first rock only appears once — handle it with a single If block before the march begins.',
+          'Once the path ahead stays clear, a While loop can run all the way to the treasure.',
         ],
       },
     },
     {
       id: 'l2-q5',
       type: 'conditional',
-      goal: 'Two switches',
-      prompt: 'Two sliding gates now block the way, each with its own switch above. Get past both gates to the treasure — one rule should handle them all.',
+      requiresConditional: true,
+      goal: 'Pillar climb',
+      prompt: 'Pillars jut from the left wall and block the straight climb. When a pillar blocks the way up, sidestep right — otherwise keep climbing.',
       map: {
-        rows: 2,
-        cols: 7,
-        start: { row: 1, col: 0 },
-        goal: { row: 1, col: 6 },
-        gates: [
-          { id: 'g1', at: { row: 1, col: 2 }, open: false },
-          { id: 'g2', at: { row: 1, col: 4 }, open: false },
-        ],
-        plates: [
-          { at: { row: 0, col: 2 }, gateId: 'g1', mode: 'open' },
-          { at: { row: 0, col: 4 }, gateId: 'g2', mode: 'open' },
-        ],
+        rows: 4,
+        cols: 4,
+        start: { row: 3, col: 0 },
+        goal: { row: 0, col: 2 },
+        obstacles: [{ row: 1, col: 0 }],
       },
-      availableCommands: ['right', 'up', 'down'],
+      availableCommands: ['right', 'up'],
       blocks: ['loop', 'if'],
-      predicateOptions: [
-        { predicate: { sensor: 'blocked', dir: 'right' }, label: 'wall on the right' },
-      ],
+      predicateOptions: wallAbove,
       loopRange,
-      cardLimits: { right: 2, up: 1, down: 1 },
+      cardLimits: { right: 2, up: 2 },
       initialProgram: [
-        {
-          kind: 'loop',
-          count: 1,
-          body: [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'blocked', dir: 'right' },
-              then: [],
-              else: [],
-              label: 'wall on the right',
-            } as Instruction,
-          ],
-          label: 'Repeat 1×',
-        } as Loop,
+        loopWithEmptyIf(1, { sensor: 'blocked', dir: 'up' }, 'wall above'),
       ],
       solution: [
         {
           kind: 'loop',
-          count: 6,
-          body: [
-            {
-              kind: 'conditional',
-              predicate: { sensor: 'blocked', dir: 'right' },
-              then: ['up', 'right', 'down'],
-              else: ['right'],
-              label: 'wall on the right',
-            } as Conditional,
-          ],
-          label: 'Repeat 6×',
+          count: 5,
+          body: [climbAround()],
+          label: 'Repeat 5×',
         } as Loop,
       ],
       feedback: {
-        correct: 'One If block, two gates — the loop opened each switch in turn and walked you through.',
+        correct: 'Sidestep around the pillar, then keep climbing — the If read the ceiling every step.',
         hints: [
-          'It is the exact same over-the-gate detour as the single-gate puzzle, just repeated more times.',
-          'Reuse that same detour rule, then count how many If-block runs it takes to reach the goal for your Repeat number.',
+          'This time the sense is "wall above", not "wall on the right".',
+          'Count how many If-block runs carry you from start to goal — that is your Repeat number.',
         ],
       },
     },
