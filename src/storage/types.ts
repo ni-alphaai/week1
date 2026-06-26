@@ -17,17 +17,48 @@ export interface LessonProgress {
   completedAt: number | null
   // Serialized composable program tree (ProgramNode[]) per step id.
   savedPrograms: Record<string, unknown>
+  /** ms timestamp the current step became active (for time-on-task accounting). */
+  openedAt: number | null
 }
 
 export interface SkillStat {
   attempts: number
   correct: number
   struggles: number
+  /** Where attempts came from. Defaults to 'lesson' for pre-existing records. */
+  source: 'lesson' | 'practice'
+  /** Practice-only attempts (excludes lesson attempts). */
+  practiceAttempts: number
+  /** Practice-only correct (excludes lesson correct). */
+  practiceCorrect: number
+  /** ms timestamp of the most recent correct answer; null when never correct or unknown. */
+  lastCorrectAt: number | null
 }
 
 export interface StepStat {
   incorrect: number
   solved: boolean
+  source: 'lesson' | 'practice'
+  /** Accumulated wall-clock time spent on this step, in ms. */
+  timeSpentMs: number
+}
+
+export interface ReviewState {
+  /** skillId -> ms timestamp of last review. */
+  lastReviewedAt: Record<string, number>
+  /** YYYY-MM-DD of the last due-queue refresh (local day). */
+  lastDueDate: string | null
+  /** lesson ids due for review. */
+  dueQueue: string[]
+}
+
+export interface AiUsage {
+  explainRequested: number
+  explainServed: number
+  explainFallback: number
+  explainLeakBlocked: number
+  genServed: number
+  genAbstained: number
 }
 
 export interface StreakState {
@@ -55,6 +86,8 @@ export interface LearnerState {
   portfolio: PortfolioArtifact[]
   /** Earned achievement ids (e.g. 'algorithm-ace'). */
   badges: string[]
+  review: ReviewState
+  aiUsage: AiUsage
 }
 
 export function emptyLearnerState(learnerId: string): LearnerState {
@@ -67,5 +100,14 @@ export function emptyLearnerState(learnerId: string): LearnerState {
     streak: { current: 0, longest: 0, lastCompletedDate: null },
     portfolio: [],
     badges: [],
+    review: { lastReviewedAt: {}, lastDueDate: null, dueQueue: [] },
+    aiUsage: {
+      explainRequested: 0,
+      explainServed: 0,
+      explainFallback: 0,
+      explainLeakBlocked: 0,
+      genServed: 0,
+      genAbstained: 0,
+    },
   }
 }

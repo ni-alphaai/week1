@@ -1,15 +1,24 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { Lesson, Step } from '../types'
-import type { LearnerProfile, LearnerState } from '../storage/types'
+import type { Instruction, Lesson, Step } from '../types'
+import type { AiUsage, LearnerProfile, LearnerState } from '../storage/types'
 import * as backend from '../storage/backend'
 import * as progress from '../storage/progress'
+import { evaluateBadges } from '../content/badges'
+import type { AwardCtx } from '../content/badges'
+
+export interface RecordResultOpts {
+  program?: Instruction[]
+  optimalSolved?: boolean
+  solveMs?: number
+}
 
 interface LearnerContextValue {
   ready: boolean
   learners: LearnerProfile[]
   activeLearner: LearnerProfile | null
   state: LearnerState | null
+  pendingBadges: string[]
   createLearner: (name: string) => void
   deleteLearner: (id: string) => void
   selectLearner: (id: string) => void
@@ -18,22 +27,58 @@ interface LearnerContextValue {
   saveProgram: (lessonId: string, stepId: string, program: unknown) => void
   setCurrentStep: (lessonId: string, stepId: string) => void
   completeConcept: (lesson: Lesson, stepId: string) => void
-  recordResult: (lesson: Lesson, stepId: string, correct: boolean, commands: Step[]) => void
+  recordResult: (
+    lesson: Lesson,
+    stepId: string,
+    correct: boolean,
+    commands: Step[],
+    opts?: RecordResultOpts,
+  ) => void
+  recordPracticeResult: (
+    lesson: Lesson,
+    stepId: string,
+    correct: boolean,
+    opts?: RecordResultOpts,
+  ) => void
+  recordReview: (lesson: Lesson, skillId: string, stepId: string, correct: boolean) => void
+  tickTimers: () => void
+  refreshReviewQueue: () => void
+  consumePendingBadges: () => string[]
+  clearPendingBadges: () => void
   restartLesson: (lesson: Lesson) => void
 }
 
 const LearnerContext = createContext<LearnerContextValue | null>(null)
+
+function mergeAiUsage(current: AiUsage, delta: Partial<AiUsage>): AiUsage {
+  return {
+    explainRequested: current.explainRequested + (delta.explainRequested ?? 0),
+    explainServed: current.explainServed + (delta.explainServed ?? 0),
+    explainFallback: current.explainFallback + (delta.explainFallback ?? 0),
+    explainLeakBlocked: current.explainLeakBlocked + (delta.explainLeakBlocked ?? 0),
+    genServed: current.genServed + (delta.genServed ?? 0),
+    genAbstained: current.genAbstained + (delta.genAbstained ?? 0),
+  }
+}
 
 export function LearnerProvider({ ownerKey, children }: { ownerKey: string; children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const [learners, setLearners] = useState<LearnerProfile[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [learnerState, setLearnerState] = useState<LearnerState | null>(null)
+  const [pendingBadges, setPendingBadges] = useState<string[]>([])
   const stateRef = useRef<LearnerState | null>(null)
 
   useEffect(() => {
     stateRef.current = learnerState
   }, [learnerState])
+
+  const installState = useCallback((loaded: LearnerState) => {
+    const migrated = progress.migrate(loaded)
+    stateRef.current = migrated
+    setLearnerState(migrated)
+    return migrated
+  }, [])
 
   // Load this owner's profiles whenever the signed-in parent (ownerKey) changes.
   useEffect(() => {
@@ -48,8 +93,7 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
         const loaded = await backend.loadState(ownerKey, storedActive)
         if (cancelled) return
         setActiveId(storedActive)
-        stateRef.current = loaded
-        setLearnerState(loaded)
+        installState(loaded)
       } else {
         setActiveId(null)
         stateRef.current = null
@@ -60,7 +104,7 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
     return () => {
       cancelled = true
     }
-  }, [ownerKey])
+  }, [ownerKey, installState])
 
   const persist = useCallback(
     (next: LearnerState) => {
@@ -83,6 +127,15 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
     [persist],
   )
 
+  // Awards any newly-earned badges for an attempt context, stashing the new ids
+  // in pendingBadges so pages can surface them once.
+  const applyBadges = useCallback((next: LearnerState, ctx: AwardCtx): LearnerState => {
+    const newIds = evaluateBadges(ctx)
+    if (newIds.length === 0) return next
+    setPendingBadges((prev) => [...prev, ...newIds.filter((id) => !prev.includes(id))])
+    return { ...next, badges: [...next.badges, ...newIds] }
+  }, [])
+
   const createLearner = useCallback(
     (name: string) => {
       void (async () => {
@@ -92,11 +145,10 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
         setLearners(updated)
         setActiveId(profile.id)
         const loaded = await backend.loadState(ownerKey, profile.id)
-        stateRef.current = loaded
-        setLearnerState(loaded)
+        installState(loaded)
       })()
     },
-    [ownerKey],
+    [ownerKey, installState],
   )
 
   const deleteLearner = useCallback(
@@ -125,18 +177,56 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       setActiveId(id)
       void (async () => {
         const loaded = await backend.loadState(ownerKey, id)
-        stateRef.current = loaded
-        setLearnerState(loaded)
+        installState(loaded)
       })()
     },
-    [ownerKey],
+    [ownerKey, installState],
   )
 
+  const flushTelemetry = useCallback(async (): Promise<void> => {
+    // The AI telemetry layer owns its own in-memory counters; another agent may
+    // expose `snapshotAndReset` to hand back deltas. Dynamic import + `as any`
+    // keeps this decoupled: if the export is absent we simply no-op.
+    try {
+      const current = stateRef.current
+      if (!current) return
+      const mod = await import('../ai/telemetry')
+      const snap = (mod as any).snapshotAndReset?.() as Partial<AiUsage> | undefined
+      if (!snap) return
+      const merged = { ...current, aiUsage: mergeAiUsage(current.aiUsage, snap) }
+      stateRef.current = merged
+      setLearnerState(merged)
+      await backend.saveState(ownerKey, merged)
+    } catch {
+      /* telemetry is best-effort */
+    }
+  }, [ownerKey])
+
   const signOut = useCallback(() => {
+    // Close out running timers and fold in any pending telemetry before we
+    // drop the in-memory state.
+    const current = stateRef.current
+    if (current) {
+      const ticked = progress.tickTimers(current)
+      void backend.saveState(ownerKey, ticked)
+      void (async () => {
+        try {
+          const mod = await import('../ai/telemetry')
+          const snap = (mod as any).snapshotAndReset?.() as Partial<AiUsage> | undefined
+          if (snap) {
+            const merged = { ...ticked, aiUsage: mergeAiUsage(ticked.aiUsage, snap) }
+            await backend.saveState(ownerKey, merged)
+          }
+        } catch {
+          /* best-effort */
+        }
+      })()
+    }
     backend.setActiveLearnerId(ownerKey, null)
     setActiveId(null)
     stateRef.current = null
     setLearnerState(null)
+    setPendingBadges([])
   }, [ownerKey])
 
   const ensureLesson = useCallback(
@@ -157,14 +247,98 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
     [mutate],
   )
   const recordResult = useCallback(
-    (lesson: Lesson, stepId: string, correct: boolean, commands: Step[]) =>
-      mutate((current) => progress.recordSequenceResult(current, lesson, stepId, correct, commands)),
+    (lesson: Lesson, stepId: string, correct: boolean, commands: Step[], opts?: RecordResultOpts) =>
+      mutate((current) => {
+        const priorIncorrect = current.stepStats[stepId]?.incorrect ?? 0
+        const next = progress.recordSequenceResult(current, lesson, stepId, correct, commands)
+        const ctx: AwardCtx = {
+          state: next,
+          lesson,
+          stepId,
+          correct,
+          source: 'lesson',
+          program: opts?.program ?? [],
+          optimalSolved: opts?.optimalSolved ?? false,
+          priorIncorrect,
+          solveMs: opts?.solveMs ?? 0,
+        }
+        return applyBadges(next, ctx)
+      }),
+    [mutate, applyBadges],
+  )
+  const recordPracticeResultAction = useCallback(
+    (lesson: Lesson, stepId: string, correct: boolean, opts?: RecordResultOpts) =>
+      mutate((current) => {
+        const priorIncorrect = current.stepStats[stepId]?.incorrect ?? 0
+        const next = progress.recordPracticeResult(current, lesson, stepId, correct)
+        const ctx: AwardCtx = {
+          state: next,
+          lesson,
+          stepId,
+          correct,
+          source: 'practice',
+          program: opts?.program ?? [],
+          optimalSolved: opts?.optimalSolved ?? false,
+          priorIncorrect,
+          solveMs: opts?.solveMs ?? 0,
+        }
+        return applyBadges(next, ctx)
+      }),
+    [mutate, applyBadges],
+  )
+  const recordReview = useCallback(
+    (lesson: Lesson, skillId: string, stepId: string, correct: boolean) =>
+      mutate((current) => {
+        const priorIncorrect = current.stepStats[stepId]?.incorrect ?? 0
+        const next = progress.recordReview(current, lesson, skillId, stepId, correct)
+        const ctx: AwardCtx = {
+          state: next,
+          lesson,
+          stepId,
+          correct,
+          source: 'practice',
+          program: [],
+          optimalSolved: false,
+          priorIncorrect,
+          solveMs: 0,
+        }
+        return applyBadges(next, ctx)
+      }),
+    [mutate, applyBadges],
+  )
+  const tickTimersAction = useCallback(() => mutate((current) => progress.tickTimers(current)), [mutate])
+  const refreshReviewQueue = useCallback(
+    () => mutate((current) => progress.refreshDueQueue(current)),
     [mutate],
   )
+  const consumePendingBadges = useCallback(() => {
+    const out = pendingBadges
+    setPendingBadges([])
+    return out
+  }, [pendingBadges])
+  const clearPendingBadges = useCallback(() => setPendingBadges([]), [])
   const restartLesson = useCallback(
     (lesson: Lesson) => mutate((current) => progress.restartLesson(current, lesson)),
     [mutate],
   )
+
+  // Fold AI telemetry deltas into persisted state on a cadence, and flush
+  // running step timers when the page is hidden or unloaded.
+  useEffect(() => {
+    const flush = () => {
+      void flushTelemetry()
+      mutate((current) => progress.tickTimers(current))
+    }
+    const interval = setInterval(() => void flushTelemetry(), 5000)
+    const onHide = () => flush()
+    window.addEventListener('pagehide', onHide)
+    document.addEventListener('visibilitychange', onHide)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('pagehide', onHide)
+      document.removeEventListener('visibilitychange', onHide)
+    }
+  }, [flushTelemetry, mutate])
 
   const activeLearner = useMemo(
     () => learners.find((profile) => profile.id === activeId) ?? null,
@@ -177,6 +351,7 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       learners,
       activeLearner,
       state: learnerState,
+      pendingBadges,
       createLearner,
       deleteLearner,
       selectLearner,
@@ -186,6 +361,12 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       setCurrentStep,
       completeConcept,
       recordResult,
+      recordPracticeResult: recordPracticeResultAction,
+      recordReview,
+      tickTimers: tickTimersAction,
+      refreshReviewQueue,
+      consumePendingBadges,
+      clearPendingBadges,
       restartLesson,
     }),
     [
@@ -193,6 +374,7 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       learners,
       activeLearner,
       learnerState,
+      pendingBadges,
       createLearner,
       deleteLearner,
       selectLearner,
@@ -202,6 +384,12 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       setCurrentStep,
       completeConcept,
       recordResult,
+      recordPracticeResultAction,
+      recordReview,
+      tickTimersAction,
+      refreshReviewQueue,
+      consumePendingBadges,
+      clearPendingBadges,
       restartLesson,
     ],
   )

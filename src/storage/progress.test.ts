@@ -2,17 +2,23 @@ import { describe, it, expect } from 'vitest'
 import type { Course, Lesson } from '../types'
 import { emptyLearnerState } from './types'
 import type { LearnerState } from './types'
+import { listLessons } from '../content/registry'
 import {
   completeConcept,
   courseCompletionPercent,
   ensureLesson,
   masteryScore,
   lessonHasProgress,
+  migrate,
   nextRecommendedLessonId,
+  recordPracticeResult,
+  recordReview,
   recordSequenceResult,
   restartLesson,
   resumeStepId,
   saveProgram,
+  stuckSteps,
+  tickTimers,
 } from './progress'
 
 // A compact two-question lesson fixture so completion is easy to reason about.
@@ -101,11 +107,22 @@ describe('recordSequenceResult — correct answers', () => {
   it('marks the step solved, saves a portfolio artifact, and updates skills', () => {
     const next = recordSequenceResult(start(), lesson, 'q1', true, ['right'])
     expect(next.stepStats['q1'].solved).toBe(true)
-    expect(next.skillStats['sequencing']).toEqual({ attempts: 1, correct: 1, struggles: 0 })
+    expect(next.skillStats['sequencing']).toEqual({
+      attempts: 1,
+      correct: 1,
+      struggles: 0,
+      source: 'lesson',
+      practiceAttempts: 0,
+      practiceCorrect: 0,
+      lastCorrectAt: expect.any(Number),
+    })
     expect(next.portfolio).toHaveLength(1)
     expect(next.portfolio[0]).toMatchObject({ lessonId: 'lesson-x', stepId: 'q1', commands: ['right'] })
     expect(next.streak.current).toBe(1)
     expect(next.streak.lastCompletedDate).toBe(localDate(0))
+    expect(next.stepStats['q1'].source).toBe('lesson')
+    expect(next.stepStats['q1'].timeSpentMs).toBeGreaterThanOrEqual(0)
+    expect(next.lessonProgress['lesson-x'].openedAt).toBeNull()
   })
 
   it('does not create a duplicate portfolio artifact when re-solving the same step', () => {
@@ -128,7 +145,12 @@ describe('recordSequenceResult — correct answers', () => {
 describe('recordSequenceResult — incorrect answers', () => {
   it('counts incorrect attempts and flags a struggle on the second miss', () => {
     let state = recordSequenceResult(start(), lesson, 'q1', false, ['right'])
-    expect(state.stepStats['q1']).toEqual({ incorrect: 1, solved: false })
+    expect(state.stepStats['q1']).toEqual({
+      incorrect: 1,
+      solved: false,
+      source: 'lesson',
+      timeSpentMs: expect.any(Number),
+    })
     expect(state.skillStats['sequencing'].struggles).toBe(0)
 
     state = recordSequenceResult(state, lesson, 'q1', false, ['right'])
@@ -188,8 +210,28 @@ describe('selectors', () => {
 
   it('masteryScore is correct/attempts as a percentage', () => {
     expect(masteryScore(undefined)).toBe(0)
-    expect(masteryScore({ attempts: 0, correct: 0, struggles: 0 })).toBe(0)
-    expect(masteryScore({ attempts: 4, correct: 3, struggles: 0 })).toBe(75)
+    expect(
+      masteryScore({
+        attempts: 0,
+        correct: 0,
+        struggles: 0,
+        source: 'lesson',
+        practiceAttempts: 0,
+        practiceCorrect: 0,
+        lastCorrectAt: null,
+      }),
+    ).toBe(0)
+    expect(
+      masteryScore({
+        attempts: 4,
+        correct: 3,
+        struggles: 0,
+        source: 'lesson',
+        practiceAttempts: 0,
+        practiceCorrect: 0,
+        lastCorrectAt: null,
+      }),
+    ).toBe(75)
   })
 
   it('resumeStepId points at the first unfinished step', () => {
@@ -218,5 +260,162 @@ describe('restartLesson', () => {
     state = saveProgram(state, 'lesson-x', 'q1', ['right-0'])
     expect(lessonHasProgress(state, 'lesson-x')).toBe(true)
     expect(lessonHasProgress(start(), 'lesson-x')).toBe(false)
+  })
+})
+
+describe('recordPracticeResult', () => {
+  it('updates skill + step stats without completing the lesson, portfolio, or streak', () => {
+    const next = recordPracticeResult(start(), lesson, 'q1', true)
+    expect(next.stepStats['q1'].solved).toBe(true)
+    expect(next.stepStats['q1'].source).toBe('practice')
+    expect(next.skillStats['sequencing']).toMatchObject({
+      attempts: 1,
+      correct: 1,
+      practiceAttempts: 1,
+      practiceCorrect: 1,
+      struggles: 0,
+    })
+    expect(next.portfolio).toHaveLength(0)
+    expect(next.streak.current).toBe(0)
+    expect(next.completedLessonIds).not.toContain('lesson-x')
+    expect(next.lessonProgress['lesson-x'].status).toBe('in_progress')
+    expect(next.lessonProgress['lesson-x'].openedAt).toBeNull()
+  })
+
+  it('counts incorrect attempts and flags a struggle on the second miss', () => {
+    let state = recordPracticeResult(start(), lesson, 'q1', false)
+    expect(state.stepStats['q1'].incorrect).toBe(1)
+    expect(state.skillStats['sequencing'].struggles).toBe(0)
+    expect(state.stepStats['q1'].solved).toBe(false)
+
+    state = recordPracticeResult(state, lesson, 'q1', false)
+    expect(state.stepStats['q1'].incorrect).toBe(2)
+    expect(state.skillStats['sequencing'].struggles).toBe(1)
+  })
+
+  it('accumulates timeSpentMs from openedAt, clamped to 10 minutes, and clears it on correct', () => {
+    const base = ensureLesson(start(), lesson)
+    base.lessonProgress['lesson-x'].openedAt = 1000
+    const now = 1000 + 20 * 60 * 1000 // 20 minutes later -> clamp to 10 min
+    const next = recordPracticeResult(base, lesson, 'q1', true, now)
+    expect(next.stepStats['q1'].timeSpentMs).toBe(10 * 60 * 1000)
+    expect(next.lessonProgress['lesson-x'].openedAt).toBeNull()
+  })
+})
+
+describe('recordReview', () => {
+  it('stamps lastReviewedAt for the reviewed skill', () => {
+    const next = recordReview(start(), lesson, 'sequencing', 'q1', true, 12345)
+    expect(next.review.lastReviewedAt['sequencing']).toBe(12345)
+    expect(next.stepStats['q1'].source).toBe('practice')
+  })
+})
+
+describe('migrate', () => {
+  it('fills missing fields on an old state and is idempotent', () => {
+    const legacy = {
+      learnerId: 'l1',
+      completedLessonIds: [],
+      lessonProgress: {
+        'lesson-x': {
+          lessonId: 'lesson-x',
+          lessonVersion: 1,
+          status: 'in_progress',
+          currentStepId: 'q1',
+          completedStepIds: [],
+          startedAt: 1,
+          updatedAt: 1,
+          completedAt: null,
+          savedPrograms: {},
+        },
+      },
+      skillStats: { seq: { attempts: 1, correct: 1, struggles: 0 } },
+      stepStats: { q1: { incorrect: 0, solved: true } },
+      streak: { current: 0, longest: 0, lastCompletedDate: null },
+      portfolio: [],
+      badges: [],
+    } as unknown as LearnerState
+
+    const next = migrate(legacy)
+    expect(next.skillStats['seq'].source).toBe('lesson')
+    expect(next.skillStats['seq'].practiceAttempts).toBe(0)
+    expect(next.skillStats['seq'].practiceCorrect).toBe(0)
+    expect(next.skillStats['seq'].lastCorrectAt).toBeNull()
+    expect(next.stepStats['q1'].source).toBe('lesson')
+    expect(next.stepStats['q1'].timeSpentMs).toBe(0)
+    expect(next.lessonProgress['lesson-x'].openedAt).toBeNull()
+    expect(next.review).toEqual({ lastReviewedAt: {}, lastDueDate: null, dueQueue: [] })
+    expect(next.aiUsage).toEqual({
+      explainRequested: 0,
+      explainServed: 0,
+      explainFallback: 0,
+      explainLeakBlocked: 0,
+      genServed: 0,
+      genAbstained: 0,
+    })
+    expect(migrate(next)).toEqual(next)
+  })
+
+  it('does not mutate the input state', () => {
+    const legacy = { ...emptyLearnerState('l1') } as unknown as LearnerState
+    delete (legacy as Record<string, unknown>).review
+    const before = JSON.stringify(legacy)
+    migrate(legacy)
+    expect(JSON.stringify(legacy)).toBe(before)
+  })
+})
+
+describe('tickTimers', () => {
+  it('accumulates elapsed time into the current step and keeps the timer live', () => {
+    const base = ensureLesson(start(), lesson)
+    base.lessonProgress['lesson-x'].currentStepId = 'q1'
+    base.lessonProgress['lesson-x'].openedAt = 1000
+    const next = tickTimers(base, 4000)
+    expect(next.stepStats['q1'].timeSpentMs).toBe(3000)
+    expect(next.lessonProgress['lesson-x'].openedAt).toBe(4000)
+  })
+
+  it('clamps accumulated time to 10 minutes', () => {
+    const base = ensureLesson(start(), lesson)
+    base.lessonProgress['lesson-x'].currentStepId = 'q1'
+    base.lessonProgress['lesson-x'].openedAt = 0
+    const next = tickTimers(base, 30 * 60 * 1000)
+    expect(next.stepStats['q1'].timeSpentMs).toBe(10 * 60 * 1000)
+  })
+
+  it('leaves lessons with no running timer alone', () => {
+    const base = ensureLesson(start(), lesson)
+    base.lessonProgress['lesson-x'].openedAt = null
+    const next = tickTimers(base, 9999)
+    expect(next.lessonProgress['lesson-x'].openedAt).toBeNull()
+  })
+})
+
+describe('stuckSteps', () => {
+  const firstPlayableStepId = (): { lessonId: string; stepId: string } => {
+    const target = listLessons()[0]
+    const stepId = target.steps.find((s) => s.type !== 'concept')?.id
+    if (!stepId) throw new Error('fixture lesson has no playable step')
+    return { lessonId: target.id, stepId }
+  }
+
+  it('lists authored steps failed twice and unsolved', () => {
+    const { lessonId, stepId } = firstPlayableStepId()
+    const state = start()
+    state.stepStats[stepId] = { incorrect: 3, solved: false, source: 'lesson', timeSpentMs: 100 }
+    const out = stuckSteps(state)
+    expect(out.find((s) => s.lessonId === lessonId && s.stepId === stepId)).toMatchObject({
+      lessonId,
+      stepId,
+      incorrect: 3,
+      timeSpentMs: 100,
+    })
+  })
+
+  it('skips solved steps even if they have many incorrect attempts', () => {
+    const { stepId } = firstPlayableStepId()
+    const state = start()
+    state.stepStats[stepId] = { incorrect: 5, solved: true, source: 'lesson', timeSpentMs: 0 }
+    expect(stuckSteps(state).find((s) => s.stepId === stepId)).toBeUndefined()
   })
 })

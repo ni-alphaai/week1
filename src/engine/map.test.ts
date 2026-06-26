@@ -322,3 +322,36 @@ describe('carryFrames', () => {
     ])
   })
 })
+
+describe('loop iteration observability', () => {
+  it('records per-loop iteration counts for a nested loop program', () => {
+    const map: MapConfig = { rows: 5, cols: 5, start: { row: 4, col: 0 }, goal: { row: 0, col: 4 } }
+    const inner: Loop = { kind: 'loop', count: 1, body: ['up', 'right'], label: 'inner' }
+    const outer: Loop = { kind: 'loop', count: 4, body: [inner], label: 'outer' }
+    const result = runInstructions(map, [outer])
+    expect(result.status).toBe('success')
+    expect(result.loopIterations).toEqual([
+      { walkIndex: 1, iterations: 4, kind: 'loop' },
+      { walkIndex: 2, iterations: 1, kind: 'loop' },
+    ])
+    expect(result.stuckBlockIndex).toBeNull()
+  })
+
+  it('sets stuckBlockIndex to the while that trips the iteration cap', () => {
+    // Body oscillates without ever satisfying the exit predicate → cap trips.
+    const map: MapConfig = { rows: 3, cols: 3, start: { row: 1, col: 1 }, goal: { row: 0, col: 0 } }
+    const w: While = { kind: 'while', predicate: { sensor: 'clear', dir: 'right' }, body: ['up', 'down'], label: 'spinner' }
+    const result = runInstructions(map, [w])
+    expect(result.status).toBe('loopStuck')
+    expect(result.stuckBlockIndex).toBe(1)
+    expect(result.loopIterations).toHaveLength(1)
+    expect(result.loopIterations[0].kind).toBe('while')
+  })
+
+  it('leaves loopIterations empty and stuckBlockIndex null for a no-loop program', () => {
+    const result = runProgram(baseMap, ['up', 'up', 'right', 'right'])
+    expect(result.status).toBe('success')
+    expect(result.loopIterations).toEqual([])
+    expect(result.stuckBlockIndex).toBeNull()
+  })
+})

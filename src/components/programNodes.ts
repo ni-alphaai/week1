@@ -4,6 +4,7 @@
 
 import type { Command, Instruction } from '../types'
 import { isAction } from '../types'
+import type { RunResult } from '../engine/map'
 import type { ProgramNode } from './CommandSequence'
 
 // Converts the editor's node tree into runnable instructions.
@@ -49,4 +50,30 @@ export function instructionToNode(inst: Instruction, locked = false): ProgramNod
     then: inst.then.map((b) => instructionToNode(b, locked)),
     else: inst.else.map((b) => instructionToNode(b, locked)),
   }
+}
+
+// Maps each ProgramNode (by its id) that is a loop/while to the iteration count
+// from the run, by walking the program tree and the run's loopIterations in the
+// same depth-first order the interpreter uses. Returns a Map<nodeId, number>.
+export function iterationMap(program: ProgramNode[], run: RunResult): Map<string, number> {
+  const result = new Map<string, number>()
+  if (run.loopIterations.length === 0) return result
+  const byWalkIndex = new Map<number, number>()
+  for (const li of run.loopIterations) byWalkIndex.set(li.walkIndex, li.iterations)
+  let counter = 0
+  const walk = (nodes: ProgramNode[]): void => {
+    for (const node of nodes) {
+      counter += 1
+      if (node.kind === 'loop' || node.kind === 'while') {
+        const iterations = byWalkIndex.get(counter)
+        if (iterations !== undefined) result.set(node.id, iterations)
+        walk(node.body)
+      } else if (node.kind === 'if') {
+        walk(node.then)
+        walk(node.else)
+      }
+    }
+  }
+  walk(program)
+  return result
 }

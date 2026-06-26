@@ -196,6 +196,15 @@ export function buildPracticeTemplate(
   }
 }
 
+// A level-3 (easier) practice template for the same concept the lesson teaches,
+// for the "Try a smaller version" scaffold. Returns null when the lesson has no
+// generator concept (caller falls back to the ghost hint). buildPracticeTemplate
+// already maps 'easier' to targetLevel 3 + the easier band, so this is a thin
+// wrapper.
+export function smallerVariantTemplate(lesson: Lesson): PuzzleTemplate | null {
+  return buildPracticeTemplate(lesson, { direction: 'easier' })
+}
+
 export function toPracticeStep(puzzle: GeneratedPuzzle, lesson: Lesson): SequenceStep {
   counter += 1
   const step: SequenceStep = {

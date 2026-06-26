@@ -29,6 +29,7 @@ import type {
 } from '../types'
 import { OPENAI_MODEL, OPENAI_STRONG_MODEL, aiGenerationEnabled } from './config'
 import { generateText } from './aiClient'
+import { recordGen } from './telemetry'
 import { validatePuzzle, validateConceptPuzzle } from '../engine/verify'
 import type { Concept, DifficultyBand, DifficultyTarget, LoopPuzzleCandidate } from '../engine/verify'
 import { scoreFor } from '../engine/difficulty'
@@ -1075,6 +1076,7 @@ async function generateAtLevel(
 
 export async function generatePuzzle(template: PuzzleTemplate): Promise<GeneratedPuzzle | null> {
   if (!aiGenerationEnabled) return null
+  recordGen('requested')
   // Graceful degradation: aim for the requested level first, then fall back to
   // level 3 (the easiest verifiable target) before abstaining to authored
   // content — so the learner never sees a hard "couldn't make a puzzle" failure.
@@ -1093,8 +1095,12 @@ export async function generatePuzzle(template: PuzzleTemplate): Promise<Generate
   }
   for (const level of levels) {
     const puzzle = await generateAtLevel(template, level)
-    if (puzzle) return puzzle
+    if (puzzle) {
+      recordGen('served')
+      return puzzle
+    }
   }
+  recordGen('abstained')
   return null
 }
 

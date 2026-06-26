@@ -1,4 +1,4 @@
-import type { Action, Command, Instruction, MapConfig, Position, Predicate, Step } from '../types'
+import type { Action, Command, Instruction, Loop, MapConfig, Position, Predicate, Step, While } from '../types'
 import { isAction } from '../types'
 
 export type RunStatus = 'success' | 'offMap' | 'hitRock' | 'missedGoal' | 'badAction' | 'loopStuck'
@@ -31,6 +31,17 @@ export interface SearchWindow {
   hi: number
 }
 
+// Per-loop/while observability: how many times a given loop or while body ran,
+// anchored to the flattened instruction walk so the UI can find the matching
+// editor node. One entry per loop/while instruction actually executed.
+export interface LoopIteration {
+  /** Index into the flattened instruction walk (the order runInstruction visits top-level instructions, descending into bodies depth-first). */
+  walkIndex: number
+  /** How many times this loop/while body ran. */
+  iterations: number
+  kind: 'loop' | 'while'
+}
+
 export interface RunResult {
   status: RunStatus
   // Tiles visited, starting with the start tile. Stops at the tile before a crash.
@@ -61,6 +72,10 @@ export interface RunResult {
   carryingAtEnd: boolean
   /** On a badAction failure, why the pickup/drop was illegal. */
   actionError?: string
+  /** One entry per loop/while instruction executed, in walk order. Empty for programs with no loops. */
+  loopIterations: LoopIteration[]
+  /** When status === 'loopStuck', the walkIndex of the loop/while that tripped the cap; else null. */
+  stuckBlockIndex: number | null
 }
 
 const DELTA: Record<Command, Position> = {
@@ -129,6 +144,16 @@ interface ExecState {
   /** Binary-search window (inclusive column bounds). Only used in binarySearch maps. */
   lo: number
   hi: number
+  /** Pre-order counter incremented once per runInstruction call; assigns each visited instruction a walk index. */
+  walkCounter: number
+  /** One LoopIteration per executed loop/while instruction, in walk order. */
+  loopIterations: LoopIteration[]
+  /** Per-instruction-object tracking state, keyed by the loop/while Instruction object. */
+  loopTracker: WeakMap<Loop | While, LoopIteration>
+  /** walkIndex stack of loops/whiles currently executing a body (innermost last). */
+  loopStack: number[]
+  /** When a loopStuck failure trips inside a loop, the walkIndex of the responsible loop/while; else null. */
+  stuckBlockIndex: number | null
 }
 
 // A failure surfaced from somewhere inside the instruction tree.
@@ -233,9 +258,18 @@ function runSearchOp(
   return resolveLanding(map, state, 'right')
 }
 
+// Records which loop/while (if any) is on the current execution stack when a
+// loopStuck failure trips, so the UI can point at the offending block. No-op
+// when the cap trips outside any loop (stuckBlockIndex stays null).
+function markStuck(state: ExecState): void {
+  const top = state.loopStack[state.loopStack.length - 1]
+  state.stuckBlockIndex = top ?? null
+}
+
 // Executes a single move or action, mutating state. Returns a failure or null.
 function runStep(map: MapConfig, state: ExecState, step: Step): ExecFailure | null {
   if (state.executed.length >= MAX_STEPS) {
+    markStuck(state)
     return { status: 'loopStuck' }
   }
 
@@ -294,8 +328,14 @@ function resolveLanding(map: MapConfig, state: ExecState, dir: Command): ExecFai
   // The tile we just teleported onto — don't immediately bounce back from it.
   let suppressTeleportAt: Position | null = null
   for (;;) {
-    if (state.path.length > MAX_STEPS) return { status: 'loopStuck' }
-    if (guard++ > MAX_STEPS) return { status: 'loopStuck' }
+    if (state.path.length > MAX_STEPS) {
+      markStuck(state)
+      return { status: 'loopStuck' }
+    }
+    if (guard++ > MAX_STEPS) {
+      markStuck(state)
+      return { status: 'loopStuck' }
+    }
     const here = state.pos
 
     // Pick up a key lying on this tile.
@@ -366,6 +406,9 @@ function runBody(map: MapConfig, state: ExecState, body: Instruction[]): ExecFai
 }
 
 function runInstruction(map: MapConfig, state: ExecState, instruction: Instruction): ExecFailure | null {
+  // Pre-order walk index for this instruction — matches the depth-first visit
+  // order the UI uses to map editor nodes to loop entries.
+  state.walkCounter += 1
   if (typeof instruction === 'string') {
     return runStep(map, state, instruction)
   }
@@ -373,26 +416,51 @@ function runInstruction(map: MapConfig, state: ExecState, instruction: Instructi
     const branch = evalPredicate(map, state, instruction.predicate) ? instruction.then : instruction.else
     return runBody(map, state, branch)
   }
+  // Register a loop/while on first encounter so nested loops each get their own
+  // entry, and re-encounters (across outer iterations) update the same entry.
+  let tracker = state.loopTracker.get(instruction)
+  if (!tracker) {
+    tracker = { walkIndex: state.walkCounter, iterations: 0, kind: instruction.kind }
+    state.loopTracker.set(instruction, tracker)
+    state.loopIterations.push(tracker)
+  }
+  state.loopStack.push(tracker.walkIndex)
   if (instruction.kind === 'loop') {
     for (let i = 0; i < instruction.count; i++) {
+      tracker.iterations = i + 1
       const failure = runBody(map, state, instruction.body)
-      if (failure) return failure
+      if (failure) {
+        state.loopStack.pop()
+        return failure
+      }
     }
+    state.loopStack.pop()
     return null
   }
   // while-loop
   let iterations = 0
   while (evalPredicate(map, state, instruction.predicate)) {
     if (iterations >= MAX_WHILE_ITERATIONS || state.executed.length >= MAX_STEPS) {
+      markStuck(state)
+      state.loopStack.pop()
       return { status: 'loopStuck' }
     }
     const before = state.executed.length
     const failure = runBody(map, state, instruction.body)
-    if (failure) return failure
+    if (failure) {
+      state.loopStack.pop()
+      return failure
+    }
     // A body that makes no progress would spin forever — stop it.
-    if (state.executed.length === before) return { status: 'loopStuck' }
+    if (state.executed.length === before) {
+      markStuck(state)
+      state.loopStack.pop()
+      return { status: 'loopStuck' }
+    }
     iterations += 1
+    tracker.iterations = iterations
   }
+  state.loopStack.pop()
   return null
 }
 
@@ -426,6 +494,11 @@ export function runInstructions(map: MapConfig, instructions: Instruction[]): Ru
     keysTaken: new Set<string>(),
     lo,
     hi,
+    walkCounter: 0,
+    loopIterations: [],
+    loopTracker: new WeakMap(),
+    loopStack: [],
+    stuckBlockIndex: null,
   }
 
   let failure: ExecFailure | null = null
@@ -444,6 +517,8 @@ export function runInstructions(map: MapConfig, instructions: Instruction[]): Ru
     end: state.pos,
     tasksCompleted: state.taskIndex,
     carryingAtEnd: state.carrying,
+    loopIterations: state.loopIterations,
+    stuckBlockIndex: state.stuckBlockIndex,
   }
 
   if (failure) {
