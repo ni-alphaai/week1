@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import type { Command, ConditionalStep, Instruction, MapConfig, Position, SequenceStep } from '../types'
 import { getLesson, getNextLessonId, registerGeneratedPuzzle } from '../content/registry'
 import { useLearner } from '../context/LearnerContext'
@@ -80,6 +80,8 @@ export function LessonPage() {
   useAiEnabled() // re-renders on AI Preference change
   const { lessonId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const isReplay = searchParams.get('replay') === '1'
   const {
     ready,
     activeLearner,
@@ -159,6 +161,12 @@ export function LessonPage() {
     if (resumedLessonRef.current === lesson.id) return
     resumedLessonRef.current = lesson.id
     ensureLesson(lesson)
+    if (isReplay) {
+      // Replay: start at step 0 with blank editors. lessonProgress is NOT
+      // mutated — completedStepIds, status, and completedAt stay intact.
+      setStepIndex(0)
+      return
+    }
     const completed = state.lessonProgress[lesson.id]?.completedStepIds ?? []
     const allComplete =
       lesson.steps.length > 0 && lesson.steps.every((step) => completed.includes(step.id))
@@ -171,7 +179,7 @@ export function LessonPage() {
     const resumeId = resumeStepId(lesson, completed)
     const index = lesson.steps.findIndex((step) => step.id === resumeId)
     setStepIndex(index < 0 ? 0 : index)
-  }, [lesson, state, ensureLesson])
+  }, [lesson, state, ensureLesson, isReplay])
 
   const currentStep = lesson?.steps[stepIndex]
   const playStep =
@@ -229,6 +237,13 @@ export function LessonPage() {
     setVariantLoading(false)
     setVariantNotice(null)
     stepStartRef.current = Date.now()
+    if (isReplay) {
+      // Replay: keep editors blank — do not hydrate savedPrograms and do not
+      // advance currentStep in lessonProgress (completedAt/status stay intact).
+      // Known limitation: per-step UI resets above (hints, lastAttempt, timers)
+      // are still applied; this is safe for Wave 2 where replay is session-only.
+      return
+    }
     if (lesson && currentStep && (currentStep.type === 'sequence' || currentStep.type === 'conditional')) {
       const saved = stateRef.current?.lessonProgress[lesson.id]?.savedPrograms[currentStep.id]
       const restored = restoreProgram(saved)

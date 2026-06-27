@@ -1,14 +1,14 @@
-import { type MouseEvent, useEffect, useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLearner } from '../context/LearnerContext'
-import { course, getLesson, listLessons } from '../content/registry'
-import { courseCompletionPercent, lessonHasProgress, nextRecommendedLessonId } from '../storage/progress'
-import { CheckIcon, ChestIcon, LockIcon, RestartIcon } from '../components/icons'
+import { course, listLessons } from '../content/registry'
+import { courseCompletionPercent, nextRecommendedLessonId } from '../storage/progress'
+import { CheckIcon, ChestIcon, LockIcon } from '../components/icons'
 import { playSound } from '../lib/sound'
 import { avatarClass, lessonIcon } from './HomePage'
 
 export function CoursePage() {
-  const { ready, activeLearner, state, restartLesson } = useLearner()
+  const { ready, activeLearner, state } = useLearner()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -31,16 +31,6 @@ export function CoursePage() {
   const completedInCourse = course.lessonOrder.filter((id) => completed.includes(id)).length
   const recommendedId = state ? nextRecommendedLessonId(state, course) : course.lessonOrder[0]
   const percent = state ? courseCompletionPercent(state, course) : 0
-
-  function handleRestart(lessonId: string, event: MouseEvent) {
-    event.preventDefault()
-    event.stopPropagation()
-    const lesson = getLesson(lessonId)
-    if (!lesson) return
-    playSound('click')
-    restartLesson(lesson)
-    navigate(`/lesson/${lessonId}`)
-  }
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 lg:max-w-4xl">
@@ -84,9 +74,8 @@ export function CoursePage() {
           const prevLessonId = index > 0 ? course.lessonOrder[index - 1] : null
           const isLocked = prevLessonId !== null && !completed.includes(prevLessonId) && !devUnlock
           const isCurrent = lesson.id === recommendedId && !isComplete && !isLocked
-          const hasProgress = state ? lessonHasProgress(state, lesson.id) : false
-          const showRestart = (isComplete || hasProgress) && !isLocked
           const action = isComplete ? 'Review' : isCurrent ? 'Continue' : 'Start'
+          const lessonHref = isComplete ? `/lesson/${lesson.id}?replay=1` : `/lesson/${lesson.id}`
           const Icon = lessonIcon(index)
           const stateClass = isLocked
             ? 'roadmap-node--locked'
@@ -128,7 +117,7 @@ export function CoursePage() {
                   </span>
                 </div>
               ) : (
-                <Link to={`/lesson/${lesson.id}`} onClick={() => playSound('click')} className="roadmap-node__card">
+                <Link to={lessonHref} onClick={() => playSound('click')} className="roadmap-node__card">
                   <span className="roadmap-node__kicker">{kicker}</span>
                   <p className="roadmap-node__title">{lesson.title}</p>
                   <p className="roadmap-node__subtitle">{lesson.subtitle}</p>
@@ -136,17 +125,6 @@ export function CoursePage() {
                     {action} <span aria-hidden="true">›</span>
                   </span>
                 </Link>
-              )}
-              {showRestart && (
-                <button
-                  type="button"
-                  onClick={(event) => handleRestart(lesson.id, event)}
-                  className="roadmap-node__restart"
-                  title="Start this lesson from the beginning"
-                >
-                  <RestartIcon className="h-3.5 w-3.5" />
-                  <span className="sr-only">Restart {lesson.title}</span>
-                </button>
               )}
             </div>
           )
