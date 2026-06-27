@@ -14,7 +14,7 @@ vi.mock('./config', () => ({
 vi.mock('./aiClient', () => ({ generateText: vi.fn() }))
 
 import { generateText } from './aiClient'
-import { generatePuzzle, __test } from './generation'
+import { generatePuzzle, __test, SMALLER_VARIANT_OPTS } from './generation'
 import type { PuzzleTemplate } from './generation'
 
 // Navigation now targets level 4: a 6x6 grid, 3 rocks, and a 7-9 move path.
@@ -380,6 +380,43 @@ describe('generatePuzzle (conditionals)', () => {
     const puzzle = await generatePuzzle(condTemplate)
     expect(puzzle).not.toBeNull()
     expect(puzzle!.concept).toBe('conditionals')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// "Try a smaller version" remediation: a familiar (authored-shaped) solution is
+// desirable, so solution-dedup must not reject it. Regression for the variant
+// silently abstaining ("pause then Watch Rico") because dedup burned its few
+// level-3-only attempts on the canonical easy solution.
+
+describe('generatePuzzle (smaller variant / familiar solutions)', () => {
+  // An authored exemplar whose solution matches what the model proposes below.
+  const authored = {
+    map: { start: { row: 1, col: 0 }, goal: { row: 1, col: 7 } },
+    availableCommands: ['right', 'up', 'down'],
+    solution: JSON.parse(condJson()).solution as unknown,
+  }
+  // Goal (1,7) walled off by its only two neighbours -> never verifies.
+  const unsolvableCond = condJson({
+    map: { start: { row: 1, col: 0 }, goal: { row: 1, col: 7 }, obstacles: [{ row: 1, col: 6 }, { row: 0, col: 7 }] },
+  })
+  const variantTemplate: PuzzleTemplate = { ...condTemplate, targetLevel: 3, authoredExemplars: [authored] }
+
+  it('abstains when dedup rejects the only valid (familiar) attempt', async () => {
+    // Valid-but-familiar puzzle first, then duds: default dedup rejects the good
+    // first attempt (not the last), so the variant abstains entirely.
+    mockedGen.mockResolvedValueOnce(condJson()).mockResolvedValue(unsolvableCond)
+    const puzzle = await generatePuzzle(variantTemplate)
+    expect(puzzle).toBeNull()
+  })
+
+  it('serves the familiar puzzle when allowFamiliarSolution is set', async () => {
+    mockedGen.mockResolvedValueOnce(condJson()).mockResolvedValue(unsolvableCond)
+    const puzzle = await generatePuzzle(variantTemplate, SMALLER_VARIANT_OPTS)
+    expect(puzzle).not.toBeNull()
+    expect(puzzle!.concept).toBe('conditionals')
+    // Served on the very first attempt instead of burning the dedup retries.
+    expect(mockedGen).toHaveBeenCalledTimes(1)
   })
 })
 

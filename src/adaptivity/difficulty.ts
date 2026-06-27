@@ -7,12 +7,12 @@ import { aiAdaptiveEnabled } from '../ai/config'
 import type { DifficultyBand } from '../engine/verify'
 
 // Target success band. Above -> make it harder; below -> make it easier.
-export const SUCCESS_BAND = { low: 0.7, high: 0.85 }
+const SUCCESS_BAND = { low: 0.7, high: 0.85 }
 
 export type DifficultyDirection = 'easier' | 'same' | 'harder'
 
 // Move-count bands the practice generator aims for, per direction.
-export const PRACTICE_BANDS: Record<DifficultyDirection, DifficultyBand> = {
+const PRACTICE_BANDS: Record<DifficultyDirection, DifficultyBand> = {
   easier: { minMoves: 2, maxMoves: 4 },
   same: { minMoves: 4, maxMoves: 6 },
   harder: { minMoves: 6, maxMoves: 9 },

@@ -22,14 +22,21 @@ app runs identically (and fully offline) with AI switched off.
   counters, binary search, and "Dodge the Beat" rhythm puzzles.
 - **Instant, specific feedback** on every run, right or wrong — hand-written by
   default, plus an optional "Explain my mistake" from Rico the bird.
-- **Escalating hints** that nudge without revealing the answer, capped by a
-  "watch Rico show you" solution replay. An anti-leak guard blocks the AI from
-  ever reciting the solution.
+- **Manual escalating hints** that nudge without revealing the answer, capped by
+  a "watch Rico show you" solution replay. Hints never auto-reveal on a failed
+  run, and an anti-leak guard blocks the AI from ever reciting the solution.
+- **"Try a smaller version" remediation** for stuck learners. The app serves a
+  deterministic authored warm-up immediately, then swaps in a fresh verified AI
+  variant if background generation finishes in time.
 - **Adaptive practice**: endless verified AI-generated puzzles that aim for the
   learner's success band (~80%), with difficulty easing or leveling up per round.
 - **Progress that persists** across sessions and resumes mid-lesson.
+- **Self-contained share links** for solved puzzles. `/share/:code` links open
+  publicly even when Firebase auth is enabled, and every shared solution is
+  re-verified before it is rendered.
 - **Habit loop**: day streaks, a course progress bar, badges, and a saved
-  portfolio of solved puzzles.
+  portfolio of solved puzzles, capped with a 3D treasure-chest reward scene when
+  WebGL is available.
 - **Parent dashboard** with skill mastery, puzzle-outcome breakdown, streaks,
   badges, and recent creations.
 - **Mobile-friendly** and touch-first.
@@ -47,20 +54,35 @@ app runs identically (and fully offline) with AI switched off.
 ## Testing
 
 ```bash
+npm run lint     # oxlint
+npx tsc -b       # type-check, including unused locals/parameters
 npm test          # run once
 npm run test:watch
+npm run build    # type-check + production Vite build
 ```
 
 Vitest covers the map engine, beat engine, answer checker, BFS solver,
-difficulty scorer, verifier, content registry, scaffolds, AI client /
-explain / generation / grounding / leakGuard, adaptivity logic, sound mute
-state, UI components, and lesson-flow integration.
+difficulty scorer, verifier, content registry, share-code validation,
+scaffolds, AI client / explain / generation / grounding / leakGuard,
+adaptivity logic, sound mute state, UI components, and lesson-flow integration.
+
+For a deeper dead-code/export pass, run:
+
+```bash
+npx knip --no-progress
+```
+
+Known Knip false positives: `functions/src/index.ts` and `functions/lib/index.js`
+are Firebase Functions entrypoints reached through `firebase.json` /
+`functions/package.json`, and several exported domain types are intentionally
+kept as app-wide contracts.
 
 ## Tech stack
 
 - React + Vite + TypeScript
 - Tailwind CSS v4
 - React Router
+- Three.js for the reward scene (loaded only by the reward components)
 - Firebase (Auth + Firestore) for cloud sync and hosting — optional and
   env-guarded; the app runs fully on local persistence without it.
 
@@ -87,12 +109,13 @@ npm run preview
   scorer, and verifier. The sole authority on whether any puzzle or solution is
   valid — AI proposals must pass it before they are shown.
 - `src/content/` — lessons authored as typed data, served via a content
-  registry; plus scaffolds, solution-structure helpers, and the generated-puzzle
-  adapter for AI practice.
+  registry; plus scaffolds, share-code validation, solution-structure helpers,
+  and generated-puzzle adapters/fallbacks for AI practice.
 - `src/ai/` — a single `generateText()` seam (`aiClient.ts`) with provider swap
   (Gemini in-browser via Firebase AI Logic, or OpenAI via a Cloud Function
   proxy). Explain, verified generation, grounding, leak guard, diagnostics, and
-  practice prefetch all flow through it and fail closed to `null`.
+  practice / review / smaller-variant prefetch all flow through it and fail
+  closed to authored content.
 - `src/adaptivity/` — per-skill mastery and adaptive difficulty direction (pure
   arithmetic over persisted stats; flag-gated, works with AI off).
 - `src/storage/` — persistence: a localStorage backend now, with a Firebase
@@ -115,7 +138,27 @@ npm run preview
 npm run deploy
 ```
 
-Without these values the app runs in local-only mode.
+The deploy script builds first, then runs `npx -y firebase-tools@latest deploy`
+so it does not require a globally installed Firebase CLI. Without Firebase env
+values the app runs in local-only mode. Public `/share/:code` routes intentionally
+bypass the auth gate so shared puzzle links work for families without a login.
+
+### Release checklist
+
+Before committing or deploying:
+
+```bash
+npm run lint
+npx tsc -b
+npm test
+npm run build
+```
+
+Then deploy with:
+
+```bash
+npm run deploy
+```
 
 ## AI provider (Gemini or OpenAI)
 

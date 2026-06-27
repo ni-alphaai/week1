@@ -14,6 +14,7 @@ import type {
   Command,
   Instruction,
   MapConfig,
+  Plate,
   Position,
   Predicate,
   PredicateOption,
@@ -317,7 +318,7 @@ function parseMap(value: unknown): MapConfig | null {
 
   if (m.plates !== undefined) {
     if (!Array.isArray(m.plates)) return null
-    const plates = []
+    const plates: Plate[] = []
     for (const pl of m.plates) {
       if (!pl || typeof pl !== 'object') return null
       const pp = pl as Record<string, unknown>
@@ -337,7 +338,7 @@ function parseMap(value: unknown): MapConfig | null {
         if (!isPosition(p, rows, cols)) return null
         list.push(p as Position)
       }
-      ;(map as Record<string, unknown>)[key] = list
+      map[key] = list
     }
   }
 

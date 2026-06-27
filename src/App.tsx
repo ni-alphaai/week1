@@ -1,8 +1,9 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { LearnerProvider } from './context/LearnerContext'
 import { AuthPage } from './pages/AuthPage'
+import { shouldGateForAuth } from './lib/authGate'
 
 // Route components are loaded on demand so the initial bundle only ships the
 // shell (providers + router). The lesson player in particular pulls in the
@@ -40,12 +41,13 @@ function AppRoutes() {
 
 function Gate() {
   const { enabled, loading, user, ownerKey } = useAuth()
+  const location = useLocation()
 
   if (loading) {
     return <div className="flex min-h-full items-center justify-center text-muted">Loading…</div>
   }
 
-  if (enabled && !user) {
+  if (shouldGateForAuth(enabled, Boolean(user), location.pathname)) {
     return <AuthPage />
   }
 

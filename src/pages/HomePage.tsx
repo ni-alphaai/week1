@@ -4,9 +4,22 @@ import { useLearner } from '../context/LearnerContext'
 import { useAuth } from '../context/AuthContext'
 import { course, getLesson, listLessons } from '../content/registry'
 import { courseCompletionPercent, nextRecommendedLessonId } from '../storage/progress'
-import { FlameIcon, CompassIcon, PackageIcon, LightbulbIcon, GemIcon, TrashIcon } from '../components/icons'
+import { BADGES, BADGE_LABELS } from '../content/badges'
+import { aiGenerationEnabled } from '../ai/config'
+import { warmReviewAhead } from '../ai/reviewPrefetch'
+import {
+  FlameIcon,
+  CompassIcon,
+  PackageIcon,
+  LightbulbIcon,
+  GemIcon,
+  TrashIcon,
+  BadgeIcon,
+  LockIcon,
+  FlagIcon,
+  ChestIcon,
+} from '../components/icons'
 import { RicoBird } from '../components/RicoBird'
-import { ProgressRing } from '../components/ProgressRing'
 import { SoundToggle } from '../components/SoundToggle'
 import { playSound } from '../lib/sound'
 
@@ -28,6 +41,55 @@ const LESSON_ICONS = [PackageIcon, LightbulbIcon, CompassIcon, GemIcon]
 
 export function lessonIcon(index: number) {
   return LESSON_ICONS[index % LESSON_ICONS.length]
+}
+
+// Lesson-completion award badges live on the lessons themselves (not in
+// content/badges), so fold their labels in here once at module load. Used as a
+// fallback for any earned id BADGE_LABELS doesn't cover.
+const AWARD_LABELS: Record<string, { title: string; blurb: string }> = {}
+for (const lesson of listLessons()) {
+  if (lesson.award) {
+    AWARD_LABELS[lesson.award.id] = { title: lesson.award.title, blurb: lesson.award.blurb }
+  }
+}
+
+function badgeLabel(id: string): { title: string; blurb: string } {
+  return BADGE_LABELS[id] ?? AWARD_LABELS[id] ?? { title: id, blurb: '' }
+}
+
+// The signature element of the home screen: a dotted trail from a start flag to
+// the treasure chest, with the explorer's marker riding at `percent`. It turns
+// the course-progress number into the literal premise of the app — guiding an
+// explorer to treasure — instead of a generic bar or ring.
+function QuestTrail({ percent }: { percent: number }) {
+  const clamped = Math.max(0, Math.min(100, Math.round(percent)))
+  const reached = clamped >= 100
+  const caption = reached
+    ? 'You reached the treasure — the whole map is yours!'
+    : clamped === 0
+      ? 'Your journey to the treasure starts here.'
+      : `You're ${clamped}% of the way to the treasure.`
+  return (
+    <div className="quest-trail">
+      <div
+        className="quest-trail__track"
+        role="img"
+        aria-label={`${clamped}% of the way to the treasure`}
+      >
+        <span className="quest-trail__flag">
+          <FlagIcon className="h-4 w-4" />
+        </span>
+        <div className="quest-trail__path">
+          <div className="quest-trail__fill" style={{ width: `${clamped}%` }} />
+          <span className="quest-trail__walker" style={{ left: `${clamped}%` }} aria-hidden="true" />
+        </div>
+        <span className={`quest-trail__chest${reached ? ' is-reached' : ''}`}>
+          <ChestIcon className="h-5 w-5" />
+        </span>
+      </div>
+      <p className="quest-trail__caption">{caption}</p>
+    </div>
+  )
 }
 
 function BrandMark() {
@@ -151,6 +213,14 @@ function HomeDashboard() {
   }, [refreshReviewQueue])
 
   const dueCount = state?.review?.dueQueue.length ?? 0
+
+  // Warm the first few reviewable puzzles in the background the moment the
+  // review card is in view, so opening Daily Review feels instant. warmReview is
+  // idempotent per lesson, so re-runs on state changes are cheap no-ops.
+  useEffect(() => {
+    if (!aiGenerationEnabled || dueCount === 0) return
+    warmReviewAhead(state?.review?.dueQueue ?? [], 0, state)
+  }, [state, dueCount])
   const lessons = listLessons()
   const completed = state?.completedLessonIds ?? []
   const completedInCourse = course.lessonOrder.filter((id) => completed.includes(id)).length
@@ -159,6 +229,9 @@ function HomeDashboard() {
   const percent = state ? courseCompletionPercent(state, course) : 0
   const streak = state?.streak.current ?? 0
   const name = activeLearner?.displayName ?? 'explorer'
+
+  const earnedBadges = state?.badges ?? []
+  const nextGoal = BADGES.find((badge) => !earnedBadges.includes(badge.id)) ?? null
 
   const started = completedInCourse > 0 || percent > 0
   const finished = percent === 100
@@ -175,21 +248,22 @@ function HomeDashboard() {
     navigate('/course')
   }
 
+  const eyebrow = finished ? 'Master explorer' : started ? 'Welcome back' : 'New explorer'
+
   return (
-    <div className="mx-auto max-w-2xl px-4 py-6">
-      <header className="topbar mb-5">
-        <div className="flex items-center gap-3">
-          <span
-            className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm ${avatarClass(name)}`}
-          >
-            {name.slice(0, 1).toUpperCase()}
-          </span>
-          <p className="font-display text-base font-bold tracking-tight text-[var(--color-text)]">{name}</p>
+    <div className="home mx-auto max-w-2xl px-4 py-6">
+      <header className="home-topbar mb-1">
+        <div className="home-topbar__who">
+          <span className={`home-avatar ${avatarClass(name)}`}>{name.slice(0, 1).toUpperCase()}</span>
+          <div className="min-w-0">
+            <p className="home-topbar__eyebrow">Explorer</p>
+            <p className="home-topbar__name truncate">{name}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="home-topbar__actions">
           {streak > 0 && (
-            <span className="streak-badge">
-              <FlameIcon className="h-3.5 w-3.5" /> {streak}
+            <span className="home-streak" title={`${streak}-day streak`}>
+              <FlameIcon className="h-4 w-4" /> {streak}
             </span>
           )}
           <SoundToggle />
@@ -199,61 +273,101 @@ function HomeDashboard() {
         </div>
       </header>
 
-      <section className="home-banner animate-float-in mb-6">
-        <RicoBird mood={mood} className="home-banner__bird" onClick={() => {}} />
-        <div className="home-banner__text">
-          <p className="home-banner__greeting">{greeting}</p>
+      <section className="quest-hero animate-float-in">
+        <div className="quest-hero__top">
+          <span className="quest-hero__rico">
+            <RicoBird mood={mood} className="quest-hero__bird" onClick={() => {}} />
+          </span>
+          <div className="min-w-0">
+            <p className="quest-hero__eyebrow">{eyebrow}</p>
+            <p className="quest-hero__greeting">{greeting}</p>
+          </div>
         </div>
-        <ProgressRing percent={percent} className="home-banner__ring" size={72} stroke={8} />
+        <QuestTrail percent={percent} />
       </section>
 
-      <button type="button" onClick={openCourse} className="course-card animate-float-in" style={{ animationDelay: '0.06s' }}>
-        <div className="course-card__art" aria-hidden="true">
-          <CompassIcon className="h-9 w-9" />
-        </div>
-        <div className="course-card__body">
-          <span className="course-card__kicker">Course</span>
-          <h2 className="course-card__title">{course.title}</h2>
-          <p className="course-card__desc">{course.description}</p>
-
-          <div className="course-card__progress">
-            <div className="progress-track">
-              <div className="progress-fill" style={{ width: `${percent}%` }} />
-            </div>
-            <span className="course-card__percent">{percent}%</span>
-          </div>
-          <p className="course-card__meta">
-            {completedInCourse} of {lessons.length} lessons complete
+      <button
+        type="button"
+        onClick={openCourse}
+        className="quest-cta animate-float-in"
+        style={{ animationDelay: '0.06s' }}
+      >
+        <span className="quest-cta__art" aria-hidden="true">
+          <CompassIcon className="h-8 w-8" />
+        </span>
+        <span className="quest-cta__body">
+          <span className="quest-cta__eyebrow">{finished ? 'Course complete' : started ? 'Continue your quest' : 'Begin your quest'}</span>
+          <span className="quest-cta__title">{course.title}</span>
+          <span className="quest-cta__meta">
+            {completedInCourse} of {lessons.length} lessons
             {recommended && !finished ? ` · Up next: ${recommended.title}` : ''}
-          </p>
-
-          <span className="course-card__cta">
-            {cta} <span aria-hidden="true">›</span>
           </span>
-        </div>
+          <span className="quest-cta__go">
+            {cta} <span aria-hidden="true">→</span>
+          </span>
+        </span>
       </button>
 
       {dueCount > 0 && (
         <Link
           to="/review"
           onClick={() => playSound('click')}
-          className="card card-interactive animate-float-in mt-4 flex items-center gap-3 px-4 py-3"
+          className="side-quest animate-float-in"
           style={{ animationDelay: '0.1s' }}
         >
-          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#8b6fd4] text-white shadow-sm">
+          <span className="side-quest__icon" aria-hidden="true">
             <LightbulbIcon className="h-5 w-5" />
           </span>
-          <span className="flex-1">
-            <span className="block font-semibold text-[var(--color-text)]">Daily review</span>
-            <span className="block text-sm text-muted">
+          <span className="side-quest__body">
+            <span className="side-quest__eyebrow">Side quest</span>
+            <span className="side-quest__title">Daily review</span>
+            <span className="side-quest__sub">
               {dueCount} skill{dueCount === 1 ? '' : 's'} ready for a quick refresher
             </span>
           </span>
-          <span className="text-lg text-soft">›</span>
+          <span className="side-quest__chevron" aria-hidden="true">
+            ›
+          </span>
         </Link>
       )}
 
-      <div className="mt-8 space-y-2">
+      <section className="treasures animate-float-in" style={{ animationDelay: '0.14s' }}>
+        <div className="treasures__head">
+          <h2 className="treasures__title">Your treasures</h2>
+          {earnedBadges.length > 0 && (
+            <span className="treasures__count">{earnedBadges.length} earned</span>
+          )}
+        </div>
+        <div className="trophy-shelf">
+          {earnedBadges.map((id) => {
+            const label = badgeLabel(id)
+            return (
+              <div key={id} className="trophy" title={label.blurb}>
+                <span className="trophy__medal">
+                  <BadgeIcon className="h-6 w-6" />
+                </span>
+                <span className="trophy__label">{label.title}</span>
+              </div>
+            )
+          })}
+          {nextGoal && (
+            <div className="trophy trophy--locked" title={nextGoal.blurb}>
+              <span className="trophy__medal">
+                <LockIcon className="h-5 w-5" />
+              </span>
+              <span className="trophy__label">{nextGoal.title}</span>
+            </div>
+          )}
+        </div>
+        {earnedBadges.length === 0 && (
+          <p className="treasures__hint">
+            Solve puzzles to earn your first treasure
+            {nextGoal ? ` — ${nextGoal.blurb}` : '!'}
+          </p>
+        )}
+      </section>
+
+      <div className="home-footer">
         <button type="button" onClick={signOut} className="btn-ghost w-full">
           Switch explorer
         </button>
@@ -261,7 +375,7 @@ function HomeDashboard() {
           <button
             type="button"
             onClick={() => void signOutParent()}
-            className="w-full cursor-pointer py-2 text-sm text-soft hover:text-muted"
+            className="home-footer__signout"
           >
             Sign out{user?.email ? ` (${user.email})` : ''}
           </button>

@@ -11,7 +11,7 @@ import type { GeneratedPuzzle } from './generation'
 import { recordPracticePuzzle } from '../content/generated'
 
 /** How many puzzles to keep generating ahead of the one the player is on. */
-export const PREFETCH_QUEUE_DEPTH = 2
+export const PREFETCH_QUEUE_DEPTH = 3
 
 export interface PrefetchSlot {
   promise: Promise<GeneratedPuzzle | null>
@@ -21,20 +21,6 @@ export interface PrefetchSlot {
 const queues = new Map<string, PrefetchSlot[]>()
 // Serializes generations per lesson so puzzle N+1 sees puzzles 1..N in history.
 const chains = new Map<string, Promise<unknown>>()
-
-export function startSlot(requestFn: () => Promise<GeneratedPuzzle | null>): PrefetchSlot {
-  const slot: PrefetchSlot = {
-    promise: Promise.resolve(null),
-    settled: false,
-  }
-  slot.promise = requestFn()
-    .catch(() => null)
-    .then((result) => {
-      slot.settled = true
-      return result
-    })
-  return slot
-}
 
 // Enqueue a generation behind any in-flight chain for this lesson. When it
 // resolves, record the puzzle so the next chained request sees it as prior context.
@@ -73,24 +59,6 @@ export function ensurePrefetchDepth(
   }
   queues.set(lessonId, queue)
   return queue
-}
-
-/** @deprecated Prefer ensurePrefetchDepth. Kept for callers that only need one slot. */
-export function ensurePrefetch(
-  lessonId: string,
-  requestFn: () => Promise<GeneratedPuzzle | null>,
-): PrefetchSlot {
-  ensurePrefetchDepth(lessonId, requestFn, 1)
-  return queues.get(lessonId)![0]
-}
-
-export function peekPrefetchQueue(lessonId: string): PrefetchSlot[] {
-  return queues.get(lessonId) ?? []
-}
-
-/** @deprecated Prefer peekPrefetchQueue. */
-export function peekPrefetch(lessonId: string): PrefetchSlot | null {
-  return peekPrefetchQueue(lessonId)[0] ?? null
 }
 
 // Remove and return the front of the prefetch queue (null if empty).

@@ -1,6 +1,5 @@
 import type { Course, Lesson } from '../types'
 import type { GeneratedPuzzle } from '../ai/generation'
-import type { ShareablePuzzle } from './shareCode'
 import { lesson1 } from './lessons/lesson1'
 import { lesson2 } from './lessons/lesson2'
 import { lesson3 } from './lessons/lesson3'
@@ -60,18 +59,4 @@ export function registerGeneratedPuzzle(stepId: string, puzzle: GeneratedPuzzle)
   const pool = generatedPool.get(stepId) ?? []
   pool.push(puzzle)
   generatedPool.set(stepId, pool)
-}
-
-// ----- Share-code puzzle pool -----
-// Optional indirection for the /share/:code route: the page may decode a share
-// code inline, or it may look it up here after a prior registration. Keyed by
-// the raw share code string.
-const sharePool = new Map<string, ShareablePuzzle>()
-
-export function registerSharePuzzle(code: string, puzzle: ShareablePuzzle): void {
-  sharePool.set(code, puzzle)
-}
-
-export function getSharePuzzle(code: string): ShareablePuzzle | undefined {
-  return sharePool.get(code)
 }

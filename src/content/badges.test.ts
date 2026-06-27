@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { Instruction, Lesson } from '../types'
 import { emptyLearnerState } from '../storage/types'
-import type { AwardCtx, LearnerState } from '../storage/types'
+import type { LearnerState } from '../storage/types'
+import type { AwardCtx } from './badges'
 import { BADGES, BADGE_LABELS, evaluateBadges } from './badges'
 
 const lesson: Lesson = {

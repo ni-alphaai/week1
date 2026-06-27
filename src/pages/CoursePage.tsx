@@ -1,4 +1,4 @@
-import { type MouseEvent } from 'react'
+import { type MouseEvent, useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLearner } from '../context/LearnerContext'
 import { course, getLesson, listLessons } from '../content/registry'
@@ -11,15 +11,21 @@ export function CoursePage() {
   const { ready, activeLearner, state, restartLesson } = useLearner()
   const navigate = useNavigate()
 
+  useEffect(() => {
+    if (ready && !activeLearner) navigate('/', { replace: true })
+  }, [ready, activeLearner, navigate])
+
+  const devUnlock = useMemo(
+    () => new URLSearchParams(window.location.search).get('dev') === 'unlock',
+    [],
+  )
+
   if (!ready) {
     return <div className="flex min-h-full items-center justify-center text-muted">Loading…</div>
   }
   if (!activeLearner) {
-    navigate('/', { replace: true })
     return null
   }
-
-  const devUnlock = new URLSearchParams(window.location.search).get('dev') === 'unlock'
   const lessons = listLessons()
   const completed = state?.completedLessonIds ?? []
   const completedInCourse = course.lessonOrder.filter((id) => completed.includes(id)).length
@@ -49,13 +55,11 @@ export function CoursePage() {
             <span aria-hidden="true">‹</span>
           </Link>
           <div>
-            <p className="text-xs font-medium text-muted">Course</p>
-            <h1 className="font-display text-xl font-bold tracking-tight text-[var(--color-text)]">{course.title}</h1>
+            <p className="page-eyebrow">Course</p>
+            <h1 className="page-title">{course.title}</h1>
           </div>
         </div>
-        <span
-          className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm ${avatarClass(activeLearner.displayName)}`}
-        >
+        <span className={`home-avatar ${avatarClass(activeLearner.displayName)}`}>
           {activeLearner.displayName.slice(0, 1).toUpperCase()}
         </span>
       </header>
@@ -73,7 +77,7 @@ export function CoursePage() {
         </p>
       </div>
 
-      <h2 className="section-label mb-4 px-1">Your adventure map</h2>
+      <h2 className="section-title mb-4 px-1">Your adventure map</h2>
       <div className="roadmap">
         {lessons.map((lesson, index) => {
           const isComplete = completed.includes(lesson.id)

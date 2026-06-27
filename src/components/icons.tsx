@@ -322,3 +322,20 @@ export function BadgeIcon({ className }: { className?: string }) {
     </svg>
   )
 }
+
+export function ShareIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <circle cx="6" cy="12" r="2.6" fill="currentColor" />
+      <circle cx="17.5" cy="6" r="2.6" fill="currentColor" />
+      <circle cx="17.5" cy="18" r="2.6" fill="currentColor" />
+      <path
+        d="M8.3 10.9l7-3.6M8.3 13.1l7 3.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}

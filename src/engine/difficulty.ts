@@ -136,7 +136,7 @@ export function cardTightness(solution: Instruction[], cardLimits?: CardLimits):
 // Turn a solved puzzle into its difficulty features. Replays the solution once
 // (via the real interpreter) to count executed moves, then reads the rest of
 // the structural features straight off the map and solution tree.
-export function extractFeatures(
+function extractFeatures(
   map: MapConfig,
   solution: Instruction[],
   cardLimits?: CardLimits,

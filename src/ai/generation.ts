@@ -118,7 +118,7 @@ export interface GeneratedPuzzle {
 // minimums. Level 4 is the default "match authored content" target; level 3 is
 // slightly easier and level 5 slightly harder.
 
-export interface ComplexityProfile {
+interface ComplexityProfile {
   /** Minimum grid size (applied to both dimensions). */
   minGridSpan: number
   /** Suggested rock count range for the prompt. */
@@ -167,7 +167,7 @@ const PROFILES: Record<3 | 4 | 5, Record<ProfileConcept, ComplexityProfile>> = {
 // Resolve a complexity profile for a concept at a target level. `mixed` defaults
 // to the loop-with-if (conditionals) shape and prefers nesting. targetLevel is
 // clamped to the supported 3..5 range.
-export function profileFor(concept: GenConcept, targetLevel: number): ComplexityProfile {
+function profileFor(concept: GenConcept, targetLevel: number): ComplexityProfile {
   const level: 3 | 4 | 5 = targetLevel <= 3 ? 3 : targetLevel >= 5 ? 5 : 4
   if (concept === 'mixed') {
     return { ...PROFILES[level].conditionals, requireNesting: true }
@@ -230,19 +230,54 @@ interface AttemptModel {
   timeoutMs?: number
 }
 
-function modelForAttempt(attempt: number): AttemptModel {
+// Per-call generation tuning. Defaults reproduce the original behavior; the
+// Daily Review passes a smaller, faster budget so a single puzzle can't stall
+// the page on four slow attempts (it is prefetched in the background anyway).
+export interface GenerateOptions {
+  /** Override the number of attempts (default MAX_ATTEMPTS). */
+  maxAttempts?: number
+  /** Use the fast model for every attempt instead of escalating. */
+  cheapOnly?: boolean
+  /**
+   * Allow a solution shape that matches an authored/prior puzzle. Endless
+   * practice + review reject near-duplicate solutions to keep variety, but the
+   * "Try a smaller version" remediation puzzle is a one-off for a struggling
+   * learner: a familiar, canonical easy solution is exactly what we want, and
+   * rejecting it just burns the (few, level-3-only) attempts and abstains.
+   */
+  allowFamiliarSolution?: boolean
+}
+
+// A small, fast budget for supplementary (review) generation.
+export const REVIEW_GEN_OPTS: GenerateOptions = { maxAttempts: 2, cheapOnly: true }
+
+// The "Try a smaller version" scaffold: a familiar easy solution is fine, so
+// don't reject shapes that resemble authored puzzles. Keep the full model ladder
+// (cheap then strong) — reliability matters more than latency here, since the
+// puzzle is warmed in the background and a learner only clicks once it is ready.
+export const SMALLER_VARIANT_OPTS: GenerateOptions = { allowFamiliarSolution: true }
+
+function modelForAttempt(attempt: number, opts?: GenerateOptions): AttemptModel {
+  if (opts?.cheapOnly) return { model: OPENAI_MODEL, timeoutMs: CHEAP_TIMEOUT_MS }
   return attempt < CHEAP_ATTEMPTS
     ? { model: OPENAI_MODEL, timeoutMs: CHEAP_TIMEOUT_MS }
     : { model: OPENAI_STRONG_MODEL, timeoutMs: STRONG_TIMEOUT_MS }
 }
 
-// Run `fn` up to MAX_ATTEMPTS times, escalating the model per the ladder, and
-// return the first truthy (verified) result, or null after exhausting attempts.
+function attemptsFor(opts?: GenerateOptions): number {
+  return Math.max(1, opts?.maxAttempts ?? MAX_ATTEMPTS)
+}
+
+// Run `fn` up to the configured number of times, escalating the model per the
+// ladder (unless cheapOnly), and return the first truthy (verified) result, or
+// null after exhausting attempts.
 async function runAttempts<T>(
   fn: (opts: AttemptModel) => Promise<T | null>,
+  opts?: GenerateOptions,
 ): Promise<T | null> {
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const result = await fn(modelForAttempt(attempt))
+  const max = attemptsFor(opts)
+  for (let attempt = 0; attempt < max; attempt++) {
+    const result = await fn(modelForAttempt(attempt, opts))
     if (result) return result
   }
   return null
@@ -273,11 +308,14 @@ function avoidLines(t: PuzzleTemplate): string[] {
 
 // Real authored puzzles from the lesson, in the exemplar JSON shape, used as
 // extra high-quality worked examples. Advisory prompt-only — never verified.
+// Match their quality and style, but the NEW puzzle's solution must not be a
+// near-copy of any authored solution.
 function authoredExemplarLines(t: PuzzleTemplate): string[] {
   if (!t.authoredExemplars || t.authoredExemplars.length === 0) return []
   return [
     'Here are real puzzles from this lesson to match in quality and style:',
     ...t.authoredExemplars.map((ex) => JSON.stringify(ex)),
+    'Match their quality and style, but your "solution" MUST be meaningfully different from every authored solution above — change the block structure, the loop counts, the predicates used, and the overall path. Do NOT just move the goal and keep the same solution.',
   ]
 }
 
@@ -286,7 +324,7 @@ function authoredExemplarLines(t: PuzzleTemplate): string[] {
 function priorGeneratedLines(t: PuzzleTemplate): string[] {
   if (!t.priorGenerated || t.priorGenerated.length === 0) return []
   return [
-    'You have ALREADY generated these puzzles this session. Produce something STRUCTURALLY DIFFERENT from ALL of them (different layout, different mechanics mix, different solution shape):',
+    'You have ALREADY generated these puzzles this session. Produce something STRUCTURALLY DIFFERENT from ALL of them — and in particular give it a DIFFERENT SOLUTION SHAPE (different block nesting, different loop/repeat counts, different predicate usage, and a different overall path), not just a different layout:',
     ...t.priorGenerated.map((p) => JSON.stringify(p)),
   ]
 }
@@ -298,6 +336,45 @@ function mechanicsPromptLines(t: PuzzleTemplate): string[] {
     ...t.mechanicsGuide.map((line) => `  • ${line}`),
     'When several mechanics appear in the lesson, rotate between them across puzzles. Match the JSON shape in the real-lesson examples below.',
   ]
+}
+
+// ---------------------------------------------------------------------------
+// Solution de-duplication. We summarize a solution into a compact signature
+// (block kinds, loop counts, predicates and move letters) so a freshly
+// generated puzzle whose solution is a near-copy of an authored or prior
+// solution can be rejected and retried. Advisory only — the engine remains the
+// sole authority on whether a puzzle is actually solvable.
+
+function predicateSignature(p: Predicate): string {
+  if (p.sensor === 'blocked' || p.sensor === 'clear') return `${p.sensor}:${p.dir}`
+  if (p.sensor === 'counterMod') return `counterMod:${p.divisor}:${p.remainder}`
+  return p.sensor
+}
+
+function instructionSignature(inst: Instruction): string {
+  if (typeof inst === 'string') return inst
+  if (inst.kind === 'loop') return `loop(${inst.count})[${inst.body.map(instructionSignature).join(',')}]`
+  if (inst.kind === 'while') {
+    return `while(${predicateSignature(inst.predicate)})[${inst.body.map(instructionSignature).join(',')}]`
+  }
+  return `if(${predicateSignature(inst.predicate)})[${inst.then.map(instructionSignature).join(',')}|${inst.else
+    .map(instructionSignature)
+    .join(',')}]`
+}
+
+function solutionSignature(solution: Instruction[]): string {
+  return solution.map(instructionSignature).join(',')
+}
+
+// Pull solution signatures out of the authored + prior puzzle JSON the template
+// carries, so generateConcept can avoid reproducing those exact solution shapes.
+function knownSolutionSignatures(t: PuzzleTemplate): Set<string> {
+  const sigs = new Set<string>()
+  for (const src of [...(t.authoredExemplars ?? []), ...(t.priorGenerated ?? [])]) {
+    const parsed = parseInstructionList((src as { solution?: unknown }).solution)
+    if (parsed && parsed.length > 0) sigs.add(solutionSignature(parsed))
+  }
+  return sigs
 }
 
 function isPositionIn(value: unknown, rows: number, cols: number): value is Position {
@@ -371,7 +448,10 @@ function parseNavMap(raw: string, t: PuzzleTemplate): MapConfig | null {
   }
 }
 
-async function generateNavigation(template: PuzzleTemplate): Promise<GeneratedPuzzle | null> {
+async function generateNavigation(
+  template: PuzzleTemplate,
+  opts?: GenerateOptions,
+): Promise<GeneratedPuzzle | null> {
   const profile = profileFor('navigation', template.targetLevel)
   const t = fitGrid(template, profile)
   const band = profile.moveBand
@@ -398,7 +478,7 @@ async function generateNavigation(template: PuzzleTemplate): Promise<GeneratedPu
       }
     }
     return null
-  })
+  }, opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -640,6 +720,7 @@ function conceptSystem(opts: {
     'CRITICAL design rules:',
     ...opts.designRules.map((rule, i) => `  ${i + 1}. ${rule}`),
     '  The solution may only use cards/blocks/predicates you offered, and must respect the cardLimits (count PLACEMENTS, not executions: a move inside a loop body counts once).',
+    '  Your solution MUST be meaningfully different from every authored and previously-generated solution shown to you — vary the block structure, the counts, the predicates, and the path. Never reuse a solution shape just because the map changed.',
   ].join('\n')
 }
 
@@ -1011,6 +1092,7 @@ async function generateConcept(
   template: PuzzleTemplate,
   spec: ConceptSpec,
   profile: ComplexityProfile,
+  opts?: GenerateOptions,
 ): Promise<GeneratedPuzzle | null> {
   const t = fitGrid(template, profile)
   // Block concepts gate on a capped numeric score target so a correct-but-simpler
@@ -1019,11 +1101,24 @@ async function generateConcept(
   // (minGridSpan / requireNesting / requireBranch) still apply unchanged — only
   // the numeric difficulty score target is capped.
   const gateLevel = Math.min(template.targetLevel, 3)
+  // Solution shapes already shown to the model (authored + prior). We reject a
+  // near-duplicate and retry, but allow it on the final attempt so a genuinely
+  // constrained puzzle still serves something rather than abstaining outright.
+  // Skipped entirely when the caller opts into familiar solutions (the smaller
+  // variant), since otherwise the dedup burns its scarce attempts and abstains.
+  const dedupeSolutions = !opts?.allowFamiliarSolution
+  const knownSigs = dedupeSolutions ? knownSolutionSignatures(t) : new Set<string>()
+  const maxAttempts = attemptsFor(opts)
+  let attemptNo = 0
   return runAttempts(async ({ model, timeoutMs }) => {
+    const isLastAttempt = attemptNo >= maxAttempts - 1
+    attemptNo += 1
     const raw = await generateText({ system: spec.system, prompt: spec.buildPrompt(t, profile), model, timeoutMs })
     if (!raw) return null
     const parsed = parseConceptPuzzle(raw, t, spec.requiredBlock)
     if (!parsed) return null
+
+    if (dedupeSolutions && !isLastAttempt && knownSigs.has(solutionSignature(parsed.candidate.solution))) return null
 
     const validation = validateConceptPuzzle(parsed.candidate, {
       band: profile.moveBand,
@@ -1054,27 +1149,31 @@ async function generateConcept(
       concept: spec.concept,
       aiGenerated: true as const,
     }
-  })
+  }, opts)
 }
 
 // Generate a verified puzzle at one specific target level (no fallback).
 async function generateAtLevel(
   template: PuzzleTemplate,
   targetLevel: number,
+  opts?: GenerateOptions,
 ): Promise<GeneratedPuzzle | null> {
   const t: PuzzleTemplate = { ...template, targetLevel }
   const concept = t.concept ?? 'navigation'
-  if (concept === 'navigation') return generateNavigation(t)
+  if (concept === 'navigation') return generateNavigation(t, opts)
   // 'mixed' aims for the loop-with-if nested shape, so it uses the conditionals
   // spec (whose exemplar nests an If inside a Repeat) with the nesting-required
   // mixed profile. Concrete concepts use their own spec + profile.
   if (concept === 'mixed') {
-    return generateConcept(t, conditionalsSpec, profileFor('mixed', t.targetLevel))
+    return generateConcept(t, conditionalsSpec, profileFor('mixed', t.targetLevel), opts)
   }
-  return generateConcept(t, CONCEPT_SPECS[concept], profileFor(concept, t.targetLevel))
+  return generateConcept(t, CONCEPT_SPECS[concept], profileFor(concept, t.targetLevel), opts)
 }
 
-export async function generatePuzzle(template: PuzzleTemplate): Promise<GeneratedPuzzle | null> {
+export async function generatePuzzle(
+  template: PuzzleTemplate,
+  opts?: GenerateOptions,
+): Promise<GeneratedPuzzle | null> {
   if (!aiGenerationEnabled) return null
   recordGen('requested')
   // Graceful degradation: aim for the requested level first, then fall back to
@@ -1094,7 +1193,7 @@ export async function generatePuzzle(template: PuzzleTemplate): Promise<Generate
     if (levels.length === 0) levels = [requested]
   }
   for (const level of levels) {
-    const puzzle = await generateAtLevel(template, level)
+    const puzzle = await generateAtLevel(template, level, opts)
     if (puzzle) {
       recordGen('served')
       return puzzle

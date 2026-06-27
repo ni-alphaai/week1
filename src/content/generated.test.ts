@@ -3,7 +3,14 @@ import type { Instruction, Lesson } from '../types'
 import type { GeneratedPuzzle } from '../ai/generation'
 import { runInstructions } from '../engine/map'
 import { checkProgram } from '../engine/checker'
-import { toPracticeStep } from './generated'
+import {
+  toPracticeStep,
+  buildPracticeTemplate,
+  smallerVariantTemplate,
+  deriveSmallerVariantPuzzle,
+  recordPracticePuzzle,
+  clearPracticeSession,
+} from './generated'
 
 const lesson: Lesson = {
   id: 'lesson-x',
@@ -120,5 +127,80 @@ describe('toPracticeStep', () => {
     // The passed-through nested solution still solves the map.
     const run = runInstructions(step.map, step.solution)
     expect(run.status).toBe('success')
+  })
+})
+
+// A lesson that maps to a real generator concept, so the templates aren't null.
+const loopLesson: Lesson = { ...lesson, id: 'lesson-2-for-loops', skillIds: ['loops'] }
+
+describe('smallerVariantTemplate', () => {
+  it('ignores session generation history so resuming does not over-constrain it', () => {
+    clearPracticeSession(loopLesson.id)
+    // Simulate the state a resuming learner returns to: the "Keep practicing"
+    // prefetch already recorded puzzles for this lesson this session.
+    recordPracticePuzzle(loopLesson.id, navPuzzle)
+    recordPracticePuzzle(loopLesson.id, navPuzzle)
+
+    // Regular practice carries that anti-repetition history…
+    const practice = buildPracticeTemplate(loopLesson, { direction: 'easier' })
+    expect(practice?.priorGenerated?.length ?? 0).toBeGreaterThan(0)
+
+    // …but the smaller-variant template must not, so it generates the same
+    // whether the learner is starting fresh or resuming mid-lesson.
+    const variant = smallerVariantTemplate(loopLesson)
+    expect(variant).not.toBeNull()
+    expect(variant!.priorGenerated ?? []).toEqual([])
+
+    clearPracticeSession(loopLesson.id)
+  })
+})
+
+describe('deriveSmallerVariantPuzzle', () => {
+  // Two authored play steps of different sizes; the easiest (fewest moves) wins.
+  const bigStep = {
+    id: 's-big',
+    type: 'sequence' as const,
+    goal: 'Long run',
+    prompt: 'Go far.',
+    map: { rows: 1, cols: 4, start: { row: 0, col: 0 }, goal: { row: 0, col: 3 }, obstacles: [] },
+    availableCommands: ['right'] as const,
+    successRule: 'reachGoal' as const,
+    solution: ['right', 'right', 'right'] as Instruction[],
+    feedback: { correct: 'Done.', hints: [] },
+  }
+  const smallStep = {
+    id: 's-small',
+    type: 'sequence' as const,
+    goal: 'Short hop',
+    prompt: 'One step.',
+    map: { rows: 1, cols: 2, start: { row: 0, col: 0 }, goal: { row: 0, col: 1 }, obstacles: [] },
+    availableCommands: ['right'] as const,
+    successRule: 'reachGoal' as const,
+    solution: ['right'] as Instruction[],
+    feedback: { correct: 'Nice.', hints: [] },
+  }
+
+  it('returns the simplest authored play step as a solvable GeneratedPuzzle', () => {
+    const l: Lesson = {
+      ...loopLesson,
+      steps: [
+        { id: 'intro', type: 'concept', title: 'Hi', body: 'x' },
+        bigStep,
+        smallStep,
+      ],
+    }
+    const puzzle = deriveSmallerVariantPuzzle(l)
+    expect(puzzle).not.toBeNull()
+    // Picked the 1-move step over the 3-move step.
+    expect(puzzle!.optimal).toBe(1)
+    expect(puzzle!.map).toEqual(smallStep.map)
+    expect(puzzle!.concept).toBe('loops')
+    // It is genuinely solvable with the carried solution.
+    expect(runInstructions(puzzle!.map, puzzle!.solution).status).toBe('success')
+  })
+
+  it('returns null when the lesson has no authored play step', () => {
+    const l: Lesson = { ...lesson, steps: [{ id: 'intro', type: 'concept', title: 'Hi', body: 'x' }] }
+    expect(deriveSmallerVariantPuzzle(l)).toBeNull()
   })
 })

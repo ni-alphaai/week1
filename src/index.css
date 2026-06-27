@@ -43,6 +43,9 @@
   --color-map-goal: rgb(107 203 61 / 0.18);
   --font-sans: "Inter", system-ui, sans-serif;
   --font-display: "Inter", system-ui, sans-serif;
+  /* Rounded, adventurous display face — scoped to the home "quest hub" so it
+     adds personality there without restyling the focused lesson UI. */
+  --font-adventure: "Fredoka", "Inter", system-ui, sans-serif;
 }
 
 :root {
@@ -265,6 +268,35 @@ body {
   color: var(--color-soft);
 }
 
+/* ---- Shared "adventure" display type ----
+   The home hub uses the rounded Fredoka face (--font-adventure) for its
+   headings. These shared classes carry that same voice onto the other
+   navigation and celebration surfaces (course, parent, daily review,
+   lesson-complete) so the app reads as one family — while the focused puzzle
+   workspace keeps its neutral Inter type (--font-display). */
+.page-eyebrow {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-soft);
+  line-height: 1;
+}
+.page-title {
+  font-family: var(--font-adventure);
+  font-size: 1.3rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  color: var(--color-text);
+}
+.section-title {
+  font-family: var(--font-adventure);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
 .step-badge {
   display: inline-flex;
   align-items: center;
@@ -276,16 +308,20 @@ body {
   color: var(--color-accent);
 }
 
+/* A streak is loot earned, so it wears the same treasure gold as the home hub
+   rather than a quiet amber pill — keeping reward signals consistent app-wide. */
 .streak-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.3rem;
   border-radius: 9999px;
-  background: var(--color-streak-soft);
-  padding: 0.25rem 0.625rem;
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: var(--color-streak);
+  background: linear-gradient(135deg, #ffe08a, #f7b32b);
+  padding: 0.3rem 0.7rem;
+  font-family: var(--font-adventure);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #8a5300;
+  box-shadow: 0 2px 8px rgb(247 179 43 / 0.4);
 }
 
 .brand-mark {
@@ -487,10 +523,29 @@ body {
 }
 
 /* The Next / Finish CTA sits on its own tidy row under the action bar so it
-   never wraps awkwardly beside Run / Reset. */
+   never wraps awkwardly beside Run / Reset. The primary Next button stays on
+   the right; any secondary action (Share) sits to its left with breathing room
+   and wraps cleanly on narrow screens. */
 .next-bar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
+  gap: 0.625rem;
+}
+
+/* Keep the Next/Finish CTA visually dominant and last in reading order. */
+.next-bar__primary {
+  order: 2;
+}
+
+/* The Share action is a quiet secondary button. A stable min-width keeps the
+   row from shifting when its label swaps to "Link copied!". */
+.next-bar__share {
+  order: 1;
+  margin-right: auto;
+  gap: 0.4rem;
+  min-width: 11.5rem;
 }
 
 .lesson-row {
@@ -608,65 +663,219 @@ body {
   background: var(--color-panel);
 }
 
-/* ---- Welcoming home dashboard ---- */
-.topbar {
+/* ---- Home: quest hub ----
+   The home screen frames the course as an adventure: a base-camp greeting from
+   Rico, a literal trail to the treasure (the signature element), then the next
+   quest and the treasures earned so far. The rounded Fredoka display face
+   (--font-adventure) is scoped to these classes so the focused lesson UI keeps
+   its neutral Inter type. */
+.home-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
 }
-
-.home-banner {
+.home-topbar__who {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding: 1.1rem 1.25rem;
-  border-radius: 22px;
-  color: var(--color-on-accent);
-  background: linear-gradient(135deg, #6bcb3d 0%, #3d9e5f 55%, #3b9ec9 130%);
-  box-shadow: 0 14px 38px rgb(61 158 95 / 0.28);
-  overflow: hidden;
-  position: relative;
+  gap: 0.7rem;
+  min-width: 0;
 }
-.home-banner::after {
+.home-topbar__eyebrow {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-soft);
+  line-height: 1;
+}
+.home-topbar__name {
+  font-family: var(--font-adventure);
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--color-text);
+  line-height: 1.2;
+}
+.home-avatar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 9999px;
+  font-family: var(--font-adventure);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 0 0 3px var(--color-surface), 0 0 0 4.5px var(--color-border);
+}
+.home-topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+/* A daily streak is loot, so it wears treasure gold rather than a quiet pill. */
+.home-streak {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 9999px;
+  font-family: var(--font-adventure);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #8a5300;
+  background: linear-gradient(135deg, #ffe08a, #f7b32b);
+  box-shadow: 0 2px 8px rgb(247 179 43 / 0.4);
+}
+
+.quest-hero {
+  position: relative;
+  overflow: hidden;
+  margin-top: 1.1rem;
+  padding: 1.25rem 1.35rem 1.4rem;
+  border-radius: 24px;
+  color: #fff;
+  background:
+    radial-gradient(120% 90% at 88% -25%, rgb(255 255 255 / 0.25), transparent 55%),
+    radial-gradient(90% 130% at -12% 125%, rgb(59 158 201 / 0.5), transparent 60%),
+    linear-gradient(150deg, #2f9c4a 0%, #4bb24a 44%, #7ed957 105%);
+  box-shadow: 0 18px 44px rgb(47 124 63 / 0.32);
+}
+/* Faint topographic map contours — texture drawn from the subject, not noise. */
+.quest-hero::before {
   content: '';
   position: absolute;
-  top: -40%;
-  right: -10%;
-  width: 220px;
-  height: 220px;
-  border-radius: 9999px;
-  background: rgb(255 255 255 / 0.12);
+  inset: 0;
+  background: repeating-radial-gradient(
+    circle at 80% 16%,
+    rgb(255 255 255 / 0.1) 0 1.5px,
+    transparent 1.5px 24px
+  );
+  opacity: 0.55;
   pointer-events: none;
 }
-.home-banner__bird {
+.quest-hero__top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.95rem;
+}
+.quest-hero__rico {
   flex-shrink: 0;
-  width: 72px;
-  height: 72px;
-  filter: drop-shadow(0 4px 8px rgb(0 0 0 / 0.18));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.16);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.24);
+}
+.quest-hero__bird {
+  width: 46px;
+  height: 46px;
+  filter: drop-shadow(0 3px 6px rgb(0 0 0 / 0.22));
   animation: bird-bob 2s ease-in-out infinite;
 }
 @keyframes bird-bob {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-5px); }
 }
-.home-banner__text {
-  flex: 1;
-  min-width: 0;
-  position: relative;
-  z-index: 1;
-}
-.home-banner__greeting {
+.quest-hero__eyebrow {
+  font-size: 0.62rem;
   font-weight: 700;
-  font-size: 1.05rem;
-  line-height: 1.35;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgb(255 255 255 / 0.82);
 }
-.home-banner__ring {
-  flex-shrink: 0;
-  color: #fff;
-  --color-ring-track: rgb(255 255 255 / 0.28);
+.quest-hero__greeting {
+  font-family: var(--font-adventure);
+  font-size: 1.3rem;
+  font-weight: 600;
+  line-height: 1.22;
+  margin-top: 0.15rem;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+/* The trail: flag → dotted path → treasure chest, with the explorer riding it. */
+.quest-trail {
   position: relative;
   z-index: 1;
+  margin-top: 1.15rem;
+}
+.quest-trail__track {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+.quest-trail__flag,
+.quest-trail__chest {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 9999px;
+}
+.quest-trail__flag {
+  color: #fff;
+  background: rgb(255 255 255 / 0.18);
+}
+.quest-trail__chest {
+  color: #ffd673;
+  background: rgb(0 0 0 / 0.14);
+}
+.quest-trail__chest.is-reached {
+  background: rgb(255 214 115 / 0.28);
+  animation: chest-glow 1.9s ease-in-out infinite;
+}
+.quest-trail__path {
+  position: relative;
+  flex: 1;
+  height: 8px;
+  border-radius: 9999px;
+  background-color: rgb(255 255 255 / 0.2);
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 7px,
+    rgb(255 255 255 / 0.32) 7px 10px
+  );
+}
+.quest-trail__fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #ffe08a, #ffb938);
+  box-shadow: 0 0 10px rgb(255 200 70 / 0.55);
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.quest-trail__walker {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #fff;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.28), inset 0 0 0 4px var(--color-accent);
+  transform: translate(-50%, -50%);
+  transition: left 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.quest-trail__caption {
+  margin-top: 0.7rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: rgb(255 255 255 / 0.92);
+}
+@keyframes chest-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(255 214 115 / 0); transform: scale(1); }
+  50% { box-shadow: 0 0 16px 2px rgb(255 214 115 / 0.7); transform: scale(1.08); }
 }
 
 .badge-chip {
@@ -868,87 +1077,236 @@ body {
   background: linear-gradient(135deg, #ffe08a, #f5b73c);
 }
 
-.course-card {
+/* Primary action: the next quest. The most visually dominant card on the page. */
+.quest-cta {
   display: flex;
   width: 100%;
   text-align: left;
   gap: 1rem;
-  padding: 1.25rem;
+  margin-top: 1rem;
+  padding: 1.1rem 1.2rem;
   border-radius: 20px;
   cursor: pointer;
-  background: linear-gradient(135deg, var(--color-surface), var(--color-panel));
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.06);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.06);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
-.course-card:hover {
+.quest-cta:hover {
   transform: translateY(-3px);
   border-color: var(--color-accent);
-  box-shadow: 0 16px 40px rgb(107 203 61 / 0.16);
+  box-shadow: 0 18px 40px rgb(107 203 61 / 0.18);
 }
-.course-card__art {
+.quest-cta__art {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 18px;
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  box-shadow: 0 8px 20px rgb(107 203 61 / 0.35);
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: linear-gradient(140deg, #6bcb3d, #3d9e5f);
+  color: #fff;
+  box-shadow: 0 8px 18px rgb(107 203 61 / 0.4);
 }
-.course-card__body {
+.quest-cta__body {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
 }
-.course-card__kicker {
-  display: inline-block;
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.1em;
+.quest-cta__eyebrow {
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--color-accent);
 }
-.course-card__title {
-  font-family: var(--font-display, inherit);
-  font-size: 1.25rem;
-  font-weight: 800;
+.quest-cta__title {
+  font-family: var(--font-adventure);
+  font-size: 1.2rem;
+  font-weight: 600;
   color: var(--color-text);
   margin-top: 0.1rem;
 }
-.course-card__desc {
-  font-size: 0.9rem;
-  color: var(--color-muted);
+.quest-cta__meta {
+  font-size: 0.82rem;
+  color: var(--color-soft);
   margin-top: 0.25rem;
 }
-.course-card__progress {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-top: 0.9rem;
-}
-.course-card__progress .progress-track {
-  flex: 1;
-}
-.course-card__percent {
-  font-size: 0.85rem;
-  font-weight: 800;
-  color: var(--color-accent);
-}
-.course-card__meta {
-  font-size: 0.78rem;
-  color: var(--color-soft);
-  margin-top: 0.45rem;
-}
-.course-card__cta {
+.quest-cta__go {
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  margin-top: 0.9rem;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+  padding: 0.5rem 1.05rem;
+  border-radius: 9999px;
+  font-family: var(--font-adventure);
   font-size: 0.92rem;
-  font-weight: 800;
-  color: var(--color-accent);
+  font-weight: 600;
+  color: #fff;
+  background: var(--color-accent);
+  box-shadow: 0 6px 16px rgb(107 203 61 / 0.4);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.quest-cta:hover .quest-cta__go {
+  background: var(--color-accent-hover);
+  transform: translateX(2px);
+}
+
+/* Secondary action: the daily review, framed as a side quest in conditional purple. */
+.side-quest {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 0.8rem;
+  padding: 0.85rem 1rem;
+  border-radius: 16px;
+  background: var(--color-surface);
+  border: 1px solid rgb(139 111 212 / 0.3);
+  box-shadow: 0 6px 18px rgb(139 111 212 / 0.1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.side-quest:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-conditional);
+  box-shadow: 0 12px 26px rgb(139 111 212 / 0.16);
+}
+.side-quest__icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(140deg, #8b6fd4, #6f53c4);
+  box-shadow: 0 6px 14px rgb(139 111 212 / 0.4);
+}
+.side-quest__body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.side-quest__eyebrow {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-conditional);
+}
+.side-quest__title {
+  font-family: var(--font-adventure);
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.side-quest__sub {
+  font-size: 0.82rem;
+  color: var(--color-muted);
+}
+.side-quest__chevron {
+  flex-shrink: 0;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: var(--color-conditional);
+}
+
+/* Treasures: a shelf of gold medallions, with the next goal shown as a locked slot. */
+.treasures {
+  margin-top: 1.5rem;
+}
+.treasures__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.55rem;
+  padding: 0 0.25rem;
+}
+.treasures__title {
+  font-family: var(--font-adventure);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.treasures__count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-soft);
+}
+.trophy-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 0.5rem;
+  padding: 1rem 0.85rem;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--color-surface), var(--color-panel));
+  border: 1px solid var(--color-border);
+}
+.trophy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.7rem 0.3rem;
+  border-radius: 14px;
+  text-align: center;
+}
+.trophy__medal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 9999px;
+  color: #fff;
+  background: linear-gradient(135deg, #ffe08a, #f5b73c);
+  box-shadow: 0 5px 14px rgb(245 183 60 / 0.45);
+}
+.trophy__label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--color-text);
+}
+.trophy--locked .trophy__medal {
+  color: var(--color-faint);
+  background: var(--color-surface-strong);
+  box-shadow: none;
+  border: 1px dashed var(--color-border-strong);
+}
+.trophy--locked .trophy__label {
+  font-weight: 600;
+  color: var(--color-soft);
+}
+.treasures__hint {
+  margin-top: 0.6rem;
+  padding: 0 0.25rem;
+  font-size: 0.82rem;
+  color: var(--color-muted);
+}
+
+.home-footer {
+  margin-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.home-footer__signout {
+  width: 100%;
+  padding: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-soft);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.home-footer__signout:hover {
+  color: var(--color-muted);
 }
 
 .back-btn {
@@ -1161,10 +1519,11 @@ body {
   color: var(--color-soft);
 }
 .roadmap-finish--reached .roadmap-finish__marker {
-  background: var(--color-warning, #e6a817);
+  background: linear-gradient(135deg, #ffe08a, #f5b73c);
   border-style: solid;
-  border-color: var(--color-warning, #e6a817);
+  border-color: #f5b73c;
   color: #fff;
+  box-shadow: 0 5px 14px rgb(245 183 60 / 0.45);
 }
 
 /* Zig-zag layout on wider screens: nodes alternate around a center spine. */
@@ -2207,16 +2566,43 @@ body {
   margin: 0;
 }
 
-.complete-icon-wrap {
+/* The lesson-complete card is a celebration surface, so it uses the larger
+   rounded radius of the home quest cards rather than the workspace 12px. */
+.reward-card {
+  border-radius: 24px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.1);
+}
+.reward-title {
+  font-family: var(--font-adventure);
+  font-size: 1.65rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.18;
+  color: var(--color-text);
+}
+/* Fixed-height stage so the layout doesn't shift between the 3D canvas and its
+   static fallback (reduced motion / no WebGL). */
+.reward-stage {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 4rem;
-  height: 4rem;
+  height: 200px;
+}
+.reward-stage--sm {
+  height: 160px;
+}
+.reward-chest-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 5rem;
+  height: 5rem;
   border-radius: 9999px;
-  background: var(--color-success-soft);
-  color: var(--color-success);
-  border: 1px solid rgb(61 158 95 / 0.3);
+  color: #fff;
+  background: linear-gradient(135deg, #ffe08a, #f5b73c);
+  box-shadow: 0 8px 20px rgb(245 183 60 / 0.45);
 }
 
 .notice-warm {
@@ -2396,11 +2782,14 @@ body {
   .animate-pulse-goal, .animate-goal-pop, .animate-confetti, .animate-tile-glow,
   .animate-water-ripple, .animate-run-pulse, .guide-card__bird,
   .guide-caret, .success-burst__ring, .success-burst__badge, .success-burst::before,
-    .roadmap-node__pulse, .badge-reveal__medal, .badge-reveal__ring, .home-banner__bird,
+    .roadmap-node__pulse, .badge-reveal__medal, .badge-reveal__ring,
+    .quest-hero__bird, .quest-trail__chest.is-reached,
     .ghost-token, .animate-teleport-arrive, .map-tile--teleport-active, .map-tile--counter-hit {
     animation: none !important;
   }
-  .progress-ring__bar { transition: none !important; }
+  .progress-ring__bar,
+  .quest-trail__fill,
+  .quest-trail__walker { transition: none !important; }
 }
 
 /* "Dodge the Beat" rhythm lane */

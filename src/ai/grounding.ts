@@ -7,7 +7,7 @@
 import type { Instruction, MapConfig, Step } from '../types'
 import type { Diagnostic } from './diagnostic'
 
-export const EXPLAIN_SYSTEM_INSTRUCTION = [
+const EXPLAIN_SYSTEM_INSTRUCTION = [
   'You are Rico, a warm, encouraging coding buddy for kids aged 9 to 11.',
   'They are learning programming logic by dragging command cards to guide an explorer across a grid to the treasure.',
   'A child just ran a program that did not work.',

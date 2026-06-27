@@ -12,8 +12,8 @@ import { aiExplainEnabled, aiGenerationEnabled } from '../ai/config'
 import { getExplanation } from '../ai/explain'
 import { ensurePrefetchDepth, PREFETCH_QUEUE_DEPTH } from '../ai/practicePrefetch'
 import { generatePuzzle } from '../ai/generation'
-import type { GeneratedPuzzle } from '../ai/generation'
-import { conceptForLesson, buildPracticeTemplate, smallerVariantTemplate, toPracticeStep } from '../content/generated'
+import { conceptForLesson, buildPracticeTemplate, toPracticeStep } from '../content/generated'
+import { warmSmallerVariant, consumeSmallerVariant, clearSmallerVariant } from '../ai/variantPrefetch'
 import { encodePuzzle } from '../content/shareCode'
 import { nextDifficultyDirection } from '../adaptivity/difficulty'
 import { lessonSuccessRate } from '../adaptivity/mastery'
@@ -25,8 +25,9 @@ import { BadgeToast } from '../components/BadgeToast'
 import { BirdGuide, type BirdMood } from '../components/BirdGuide'
 import { FormattedText } from '../components/FormattedText'
 import { Confetti } from '../components/Confetti'
+import { TreasureChestReward } from '../components/TreasureChestReward'
 import { SoundToggle } from '../components/SoundToggle'
-import { FlameIcon, CheckCircleIcon, LightbulbIcon, BadgeIcon, CompassIcon } from '../components/icons'
+import { FlameIcon, CheckCircleIcon, CheckIcon, LightbulbIcon, BadgeIcon, CompassIcon, ChestIcon, ShareIcon } from '../components/icons'
 import { pickHint } from '../lib/hints'
 import { playSound } from '../lib/sound'
 import { BeatPuzzle } from '../components/BeatPuzzle'
@@ -153,16 +154,18 @@ export function LessonPage() {
   // #10 share-this-puzzle: transient "copied" acknowledgement.
   const [shareCopied, setShareCopied] = useState(false)
   // #4 "Try a smaller version": the active easier variant (null = main puzzle),
-  // a loading flag, and a transient fallback notice.
+  // a loading flag, a transient fallback notice, the warmed variant's status
+  // ('warming' shows a disabled "Preparing…", 'ready' enables the button,
+  // 'failed' lets a click re-attempt), and a token bumped to request a fresh one.
   const [variantStep, setVariantStep] = useState<SequenceStep | null>(null)
   const [variantLoading, setVariantLoading] = useState(false)
   const [variantNotice, setVariantNotice] = useState<string | null>(null)
+  const [variantStatus, setVariantStatus] = useState<'warming' | 'ready' | 'failed'>('warming')
+  const [variantGen, setVariantGen] = useState(0)
 
   // Elapsed-time anchor for the current step, reset on every step change so a
   // correct run can report how long the learner took (#11 solveMs).
   const stepStartRef = useRef(Date.now())
-  // Single-flight cache of the prefetched smaller variant for the current step.
-  const smallerRef = useRef<Promise<GeneratedPuzzle | null> | null>(null)
 
   const timers = useRef<number[]>([])
   const feedbackRef = useRef<HTMLDivElement>(null)
@@ -176,14 +179,31 @@ export function LessonPage() {
     if (ready && !activeLearner) navigate('/', { replace: true })
   }, [ready, activeLearner, navigate])
 
+  // Resume the learner at their in-progress step. This must wait for `state` to
+  // be loaded: on a hard reload (or reopening the tab) at /lesson/:id the page
+  // can mount before the persisted state arrives, and resuming with no state
+  // would strand the learner back at step 0. We run it once per lesson (guarded
+  // by resumedLessonRef) so it restores progress on entry without overriding
+  // the learner's own navigation afterwards.
+  const resumedLessonRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!lesson) return
+    if (!lesson || !state) return
+    if (resumedLessonRef.current === lesson.id) return
+    resumedLessonRef.current = lesson.id
     ensureLesson(lesson)
-    const completed = stateRef.current?.lessonProgress[lesson.id]?.completedStepIds ?? []
+    const completed = state.lessonProgress[lesson.id]?.completedStepIds ?? []
+    const allComplete =
+      lesson.steps.length > 0 && lesson.steps.every((step) => completed.includes(step.id))
+    if (allComplete) {
+      // Re-opening a finished lesson (e.g. the course "Review" link) should land
+      // on the reward/completion screen, not replay the final step.
+      setStepIndex(lesson.steps.length)
+      return
+    }
     const resumeId = resumeStepId(lesson, completed)
     const index = lesson.steps.findIndex((step) => step.id === resumeId)
     setStepIndex(index < 0 ? 0 : index)
-  }, [lesson, ensureLesson])
+  }, [lesson, state, ensureLesson])
 
   const currentStep = lesson?.steps[stepIndex]
 
@@ -216,7 +236,6 @@ export function LessonPage() {
     setVariantStep(null)
     setVariantLoading(false)
     setVariantNotice(null)
-    smallerRef.current = null
     stepStartRef.current = Date.now()
     if (lesson && currentStep && (currentStep.type === 'sequence' || currentStep.type === 'conditional')) {
       const saved = stateRef.current?.lessonProgress[lesson.id]?.savedPrograms[currentStep.id]
@@ -239,8 +258,8 @@ export function LessonPage() {
 
   // Once the learner crosses the halfway point of the lesson, warm up the first
   // "Keep practicing" puzzle in the background so the PracticePage can serve it
-  // instantly. Fires at most once per lesson; ensurePrefetch is single-flight and
-  // its promise never rejects, so the request function only needs to avoid throwing.
+  // instantly. Fires at most once per lesson; ensurePrefetchDepth is single-flight
+  // and its promise never rejects, so the request function only needs to avoid throwing.
   useEffect(() => {
     if (!lesson || !aiGenerationEnabled) return
     if (conceptForLesson(lesson) === null) return
@@ -259,29 +278,43 @@ export function LessonPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lesson, stepIndex])
 
-  // #4: as soon as the learner has exhausted the text hints on a play step (the
-  // same gate as the ghost demo), warm up one easier AI variant in the
-  // background so the "Try a smaller version" button is instant. Single-flight
-  // via smallerRef, which the step-change effect clears so each step gets a
-  // fresh variant. Mirrors the canShowGhost gate using raw state since the
-  // derived consts are computed after the early return below.
+  // #4: warm the lesson's easier "Try a smaller version" puzzle in the
+  // background as soon as the learner reaches a play step. The cache
+  // (ai/variantPrefetch) is lesson-scoped and single-flight, so this warms once
+  // per lesson and is reused across every step. Readiness resolves from the
+  // deterministic authored fallback, so the button becomes clickable almost
+  // immediately (AI generation, when it lands, upgrades the served puzzle in the
+  // background). `failed` only happens for the rare lesson with no authored play
+  // step to fall back to — then the affordance is hidden and Rico's demo stands in.
   useEffect(() => {
     if (!lesson || !aiGenerationEnabled) return
     if (conceptForLesson(lesson) === null) return
-    if (smallerRef.current) return
     const step = lesson.steps[stepIndex]
     if (!step || (step.type !== 'sequence' && step.type !== 'conditional')) return
-    const hintTotal = step.feedback.hints.length
-    const priorIncorrect = stateRef.current?.stepStats[step.id]?.incorrect ?? 0
-    const auto = feedback?.status === 'incorrect' ? priorIncorrect : 0
-    const level = Math.max(manualHintLevel, auto)
-    if (level < hintTotal) return // hints not yet exhausted
-    const template = smallerVariantTemplate(lesson)
-    if (!template) return
-    smallerRef.current = generatePuzzle(template)
-    // stateRef is read fresh; only the hint-affecting inputs need to retrigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lesson, stepIndex, manualHintLevel, feedback])
+    const pending = warmSmallerVariant(lesson)
+    if (!pending) return
+    let active = true
+    void pending.then((puzzle) => {
+      if (!active) return
+      setVariantStatus(puzzle ? 'ready' : 'failed')
+    })
+    return () => {
+      active = false
+    }
+  }, [lesson, stepIndex, variantGen])
+
+  // Back to "warming" when the lesson changes or a fresh variant is requested.
+  useEffect(() => {
+    setVariantStatus('warming')
+  }, [lesson, variantGen])
+
+  // Drop the cached variant when leaving the lesson so a different lesson (or a
+  // later return) warms a fresh one instead of reusing a stale puzzle.
+  useEffect(() => {
+    if (!lesson) return
+    const lessonId = lesson.id
+    return () => clearSmallerVariant(lessonId)
+  }, [lesson])
 
   if (!lesson) {
     return (
@@ -301,20 +334,30 @@ export function LessonPage() {
 
   const priorFails =
     isPlayStep && currentStep ? (state?.stepStats[currentStep.id]?.incorrect ?? 0) : 0
-  const autoHintLevel = feedback?.status === 'incorrect' ? priorFails : 0
-  const hintLevel = Math.max(manualHintLevel, autoHintLevel)
   const hintCount = isPlayStep && currentStep ? currentStep.feedback.hints.length : 0
+  // Hints are shown ONLY when the learner asks for one — never auto-revealed on a
+  // failed run.
   const activeHint =
-    isPlayStep && currentStep && hintLevel > 0
-      ? pickHint(currentStep.feedback.hints, hintLevel - 1)
+    isPlayStep && currentStep && manualHintLevel > 0
+      ? pickHint(currentStep.feedback.hints, manualHintLevel - 1)
       : null
-  const canAskHint = isPlayStep && hintLevel < hintCount
-  // Once the text hints are exhausted, Rico can demonstrate the solution.
-  const canShowGhost = !!isPlayStep && !canAskHint
+  const canAskHint = isPlayStep && manualHintLevel < hintCount
+  // Rico's demo + the smaller variant unlock once the learner is clearly stuck:
+  // they've worked through every hint, or they've already missed this step.
+  const stuckLevel = Math.max(manualHintLevel, feedback?.status === 'incorrect' ? priorFails : 0)
+  const canShowGhost = !!isPlayStep && stuckLevel >= hintCount
   // #4: an AI-generated easier variant is offered alongside the ghost when the
   // lesson maps to a generator concept and generation is enabled.
+  // Offered once the learner is stuck and the lesson supports generation, until
+  // generation has conclusively failed (then it's hidden and Rico's demo stands
+  // in). While warming the button is shown but disabled ("Preparing…"); it only
+  // becomes clickable once a real puzzle is ready, so a click always opens one.
   const canTrySmaller =
-    canShowGhost && aiGenerationEnabled && !!lesson && conceptForLesson(lesson) !== null
+    canShowGhost &&
+    aiGenerationEnabled &&
+    !!lesson &&
+    conceptForLesson(lesson) !== null &&
+    variantStatus !== 'failed'
 
   function persistProgram(next: ProgramNode[]) {
     if (!lesson || !currentStep || (currentStep.type !== 'sequence' && currentStep.type !== 'conditional')) return
@@ -398,7 +441,7 @@ export function LessonPage() {
   function handleHint() {
     if (!canAskHint) return
     playSound('click')
-    setManualHintLevel(hintLevel + 1)
+    setManualHintLevel((level) => level + 1)
     if (feedbackRef.current) {
       feedbackRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
@@ -465,30 +508,32 @@ export function LessonPage() {
   // #4: enter "smaller variant" mode using the prefetched (or freshly generated)
   // easier puzzle. On failure/abstain, surface a brief notice and fall back to
   // the ghost demo so the learner is never blocked.
-  async function handleTrySmaller() {
+  function handleTrySmaller() {
     if (!lesson || variantLoading) return
     playSound('click')
     setVariantLoading(true)
     try {
-      let pending = smallerRef.current
-      if (!pending) {
-        const template = smallerVariantTemplate(lesson)
-        pending = template ? generatePuzzle(template) : Promise.resolve(null)
-        smallerRef.current = pending
-      }
-      const puzzle = await pending
+      // The button is only enabled once a variant is ready, so the freshest
+      // puzzle (AI upgrade if it landed, else the authored fallback) is available
+      // synchronously from the lesson cache.
+      const puzzle = consumeSmallerVariant(lesson.id)
       if (puzzle) {
         const step = toPracticeStep(puzzle, lesson)
         registerGeneratedPuzzle(step.id, puzzle)
         setVariantStep(step)
         setVariantNotice(null)
       } else {
-        smallerRef.current = null
+        // Safety net only — readiness gating makes this path rare. Never block
+        // the learner: fall back to the ghost demo.
         setVariantNotice('No smaller version right now — watch Rico instead.')
         const clear = window.setTimeout(() => setVariantNotice(null), 2600)
         timers.current.push(clear)
         handleShowGhost()
       }
+      // Drop the used variant and request a fresh one (re-tracking readiness) so
+      // the next struggle gets a different warm-up, still pre-cached.
+      clearSmallerVariant(lesson.id)
+      setVariantGen((n) => n + 1)
     } finally {
       setVariantLoading(false)
     }
@@ -645,23 +690,39 @@ export function LessonPage() {
       <div className="animate-float-in mx-auto max-w-md px-4 py-10">
         <BadgeToast />
         <Confetti count={earnedBadge ? 70 : 36} />
-        <div className="card-elevated p-8 text-center">
+        <div className="reward-card p-8 text-center">
           {earnedBadge && lesson.award ? (
             <>
-              <div className="badge-reveal mx-auto mb-4">
-                <span className="badge-reveal__ring" aria-hidden="true" />
-                <BadgeIcon className="badge-reveal__medal h-16 w-16" />
+              <div className="reward-stage mx-auto mb-2">
+                <TreasureChestReward
+                  variant="badge"
+                  size={200}
+                  fallback={
+                    <div className="badge-reveal">
+                      <span className="badge-reveal__ring" aria-hidden="true" />
+                      <BadgeIcon className="badge-reveal__medal h-16 w-16" />
+                    </div>
+                  }
+                />
               </div>
               <p className="badge-reveal__kicker">Badge earned</p>
-              <h1 className="font-display text-2xl font-bold text-[var(--color-text)]">{lesson.award.title}</h1>
+              <h1 className="reward-title">{lesson.award.title}</h1>
               <p className="mt-2 text-muted">{lesson.award.blurb}</p>
             </>
           ) : (
             <>
-              <div className="complete-icon-wrap mx-auto mb-4">
-                <CheckCircleIcon className="animate-goal-pop h-9 w-9" />
+              <div className="reward-stage mx-auto mb-2">
+                <TreasureChestReward
+                  variant="chest"
+                  size={200}
+                  fallback={
+                    <div className="reward-chest-fallback">
+                      <ChestIcon className="h-10 w-10" />
+                    </div>
+                  }
+                />
               </div>
-              <h1 className="font-display text-2xl font-bold text-[var(--color-text)]">Lesson complete</h1>
+              <h1 className="reward-title">Lesson complete</h1>
               <p className="mt-1 text-muted">You finished “{lesson.title}”.</p>
             </>
           )}
@@ -797,13 +858,13 @@ export function LessonPage() {
                 onClick={handleHint}
                 disabled={!canAskHint || animating || ghostPlaying}
                 className="btn-hint"
-                aria-label={`Get a hint (${hintLevel} of ${hintCount} used)`}
+                aria-label={`Get a hint (${manualHintLevel} of ${hintCount} used)`}
               >
                 <LightbulbIcon className="h-4 w-4" />
                 {canAskHint ? 'Need a hint?' : 'Hints used'}
                 {hintCount > 0 && (
                   <span className="hint-count">
-                    {Math.min(hintLevel, hintCount)}/{hintCount}
+                    {Math.min(manualHintLevel, hintCount)}/{hintCount}
                   </span>
                 )}
               </button>
@@ -823,12 +884,20 @@ export function LessonPage() {
                 <button
                   type="button"
                   onClick={handleTrySmaller}
-                  disabled={variantLoading || animating || ghostPlaying}
+                  disabled={variantStatus !== 'ready' || variantLoading || animating || ghostPlaying}
                   className="btn-hint"
-                  aria-label="Try a smaller version of this puzzle"
+                  aria-label={
+                    variantStatus === 'ready'
+                      ? 'Try a smaller version of this puzzle'
+                      : 'Preparing a smaller version'
+                  }
                 >
                   <LightbulbIcon className="h-4 w-4" />
-                  {variantLoading ? 'Making one…' : 'Try a smaller version'}
+                  {variantStatus !== 'ready'
+                    ? 'Preparing a smaller version…'
+                    : variantLoading
+                      ? 'Making one…'
+                      : 'Try a smaller version'}
                 </button>
               )}
               {aiExplainEnabled && feedback?.status === 'incorrect' && lastAttempt && (
@@ -921,16 +990,28 @@ export function LessonPage() {
 
                 {feedback?.status === 'correct' && (
                   <div className="next-bar">
-                    <button type="button" onClick={goNext} className="btn-primary animate-pop-in">
-                      {stepIndex + 1 >= totalSteps ? 'Finish' : 'Next'}
-                    </button>
                     <button
                       type="button"
                       onClick={handleShare}
-                      className="btn-ghost animate-pop-in"
+                      className="btn-ghost next-bar__share animate-pop-in inline-flex items-center justify-center"
                       aria-label="Copy a link to share this puzzle"
                     >
-                      {shareCopied ? 'Link copied!' : 'Share this puzzle'}
+                      {shareCopied ? (
+                        <>
+                          <CheckIcon className="h-4 w-4" /> Link copied!
+                        </>
+                      ) : (
+                        <>
+                          <ShareIcon className="h-4 w-4" /> Share this puzzle
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={goNext}
+                      className="btn-primary next-bar__primary animate-pop-in"
+                    >
+                      {stepIndex + 1 >= totalSteps ? 'Finish' : 'Next'}
                     </button>
                   </div>
                 )}

@@ -7,7 +7,6 @@ import { dueSkills } from '../adaptivity/mastery'
 // Per-session cap on time-on-task accumulated from a single openedAt stamp, so
 // a tab left open overnight can't inflate a step's timeSpentMs unbounded.
 const MAX_STEP_MS = 10 * 60 * 1000
-const DAY_MS = 24 * 60 * 60 * 1000
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { isMuted, subscribeMuted, toggleMuted } from '../lib/sound'
 
-export function useMuted(): boolean {
+function useMuted(): boolean {
   const [muted, setMuted] = useState(isMuted)
   useEffect(() => subscribeMuted(setMuted), [])
   return muted

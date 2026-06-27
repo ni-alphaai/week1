@@ -187,6 +187,23 @@ describe('PracticePage (loop puzzles)', () => {
 
     expect(screen.getByRole('button', { name: 'Share this puzzle' })).toBeInTheDocument()
   })
+
+  it('auto-resets the "Link copied!" confirmation so the share button never sticks', async () => {
+    holder.current = { ...holder.base, initialProgram: holder.loopSolution, editableInitial: true }
+    renderPractice()
+
+    await screen.findByText(/Repeat …× block/)
+    fireEvent.click(screen.getByRole('button', { name: 'Run program' }))
+    await screen.findByText('Next puzzle', undefined, { timeout: 4000 })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Share this puzzle' }))
+    // Immediate confirmation…
+    expect(screen.getByRole('button', { name: 'Link copied!' })).toBeInTheDocument()
+    // …which resets on its own (the bug being guarded against was it sticking).
+    expect(
+      await screen.findByRole('button', { name: 'Share this puzzle' }, { timeout: 2500 }),
+    ).toBeInTheDocument()
+  })
 })
 
 describe('PracticePage (navigation puzzles)', () => {
@@ -258,8 +275,8 @@ describe('PracticePage (one-ahead prefetch)', () => {
     renderPracticeStrict()
 
     await screen.findByText(/Repeat …× block/)
-    // One on-demand generation for the shown puzzle + two queued ahead = 3.
-    expect(mockGeneratePuzzle.mock.calls.length).toBe(3)
+    // One on-demand generation for the shown puzzle + three queued ahead = 4.
+    expect(mockGeneratePuzzle.mock.calls.length).toBe(4)
   })
 })
 

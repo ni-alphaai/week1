@@ -4,6 +4,7 @@ import type { Action, Command, Instruction, Position, SequenceStep } from '../ty
 import { getLesson, registerGeneratedPuzzle } from '../content/registry'
 import { useLearner } from '../context/LearnerContext'
 import { checkProgram } from '../engine/checker'
+import { carryFrames } from '../engine/map'
 import type { RunResult } from '../engine/map'
 import { MapGrid } from '../components/MapGrid'
 import { CommandSequence } from '../components/CommandSequence'
@@ -110,6 +111,12 @@ export function PracticePage() {
   const [loopStuck, setLoopStuck] = useState(false)
   // Brief "Link copied!" confirmation after sharing the current puzzle.
   const [shareCopied, setShareCopied] = useState(false)
+  // Fetch-and-carry + teleport run animation (generated practice puzzles can
+  // include pickup/drop tasks and teleport pads).
+  const [taskPicked, setTaskPicked] = useState(0)
+  const [taskDropped, setTaskDropped] = useState(0)
+  const [isTeleporting, setIsTeleporting] = useState(false)
+  const [isDeparting, setIsDeparting] = useState(false)
 
   // Within-session running success, so difficulty adapts round to round.
   const sessionRef = useRef({ attempts: 0, correct: 0 })
@@ -194,6 +201,10 @@ export function PracticePage() {
       setSolved(false)
       setIterations(null)
       setLoopStuck(false)
+      setTaskPicked(0)
+      setTaskDropped(0)
+      setIsTeleporting(false)
+      setIsDeparting(false)
       setShareCopied(false)
       setProgram([])
 
@@ -277,6 +288,10 @@ export function PracticePage() {
     setSolved(false)
     setIterations(null)
     setLoopStuck(false)
+    setTaskPicked(0)
+    setTaskDropped(0)
+    setIsTeleporting(false)
+    setIsDeparting(false)
     setShareCopied(false)
     setActiveTile(null)
     setFeedback(null)
@@ -308,12 +323,36 @@ export function PracticePage() {
     setExplainText(null)
     setActiveTile(result.run.path[0])
     setExplorer(result.run.path[0])
+    setIsTeleporting(false)
+    setIsDeparting(false)
+    setTaskPicked(0)
+    setTaskDropped(0)
     playSound('runStart')
+
+    const frames = carryFrames(result.run.path, result.run.events)
+    const worldEvents = result.run.worldEvents
+    const teleportSteps = new Set<number>()
+    const teleportDepartSteps = new Set<number>()
+    for (const ev of worldEvents) {
+      if (ev.kind === 'teleport') teleportSteps.add(ev.pathIndex)
+      if (ev.kind === 'teleport-depart') teleportDepartSteps.add(ev.pathIndex)
+    }
 
     result.run.path.forEach((pos, index) => {
       const timer = window.setTimeout(() => {
         setExplorer(pos)
         setActiveTile(pos)
+        setIsTeleporting(teleportSteps.has(index))
+        setIsDeparting(teleportDepartSteps.has(index))
+        const frame = frames[index] ?? { picked: 0, dropped: 0 }
+        setTaskPicked((prev) => {
+          if (frame.picked > prev) playSound('pick')
+          return frame.picked
+        })
+        setTaskDropped((prev) => {
+          if (frame.dropped > prev) playSound('place')
+          return frame.dropped
+        })
         if (index > 0) {
           const dir = facingBetween(result.run.path[index - 1], pos)
           if (dir) setFacing(dir)
@@ -326,6 +365,11 @@ export function PracticePage() {
     const endTimer = window.setTimeout(() => {
       setAnimating(false)
       setActiveTile(null)
+      setIsTeleporting(false)
+      setIsDeparting(false)
+      const lastFrame = frames[frames.length - 1] ?? { picked: 0, dropped: 0 }
+      setTaskPicked(lastFrame.picked)
+      setTaskDropped(lastFrame.dropped)
       if (!result.correct && result.run.status !== 'success') setCrashed(true)
       if (result.correct) setSolved(true)
       setLoopStuck(result.run.status === 'loopStuck')
@@ -386,8 +430,12 @@ export function PracticePage() {
       feedback: step.feedback,
     }
     const url = `${window.location.origin}/share/${encodePuzzle(payload)}`
-    void navigator.clipboard?.writeText(url)
+    void navigator.clipboard?.writeText(url).catch(() => {})
     setShareCopied(true)
+    const reset = window.setTimeout(() => {
+      if (isMounted.current) setShareCopied(false)
+    }, 1800)
+    timers.current.push(reset)
   }
 
   function bird(): { message: string; mood: BirdMood } {
@@ -495,6 +543,10 @@ export function PracticePage() {
                   loopStuck={loopStuck}
                   facing={facing}
                   activeTile={activeTile}
+                  taskPicked={taskPicked}
+                  taskDropped={taskDropped}
+                  isTeleporting={isTeleporting}
+                  isDeparting={isDeparting}
                 />
               </div>
 

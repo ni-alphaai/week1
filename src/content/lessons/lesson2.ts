@@ -1,4 +1,4 @@
-import type { Conditional, Instruction, Lesson, Loop, While } from '../../types'
+import type { Conditional, Lesson, Loop, PredicateOption, While } from '../../types'
 import { emptyConditional, emptyWhile, loopWithEmptyIf, whileWithEmptyIf } from '../scaffolds'
 
 // If a wall is on the right, climb over it; otherwise just step right.
@@ -47,10 +47,10 @@ const climbAround = (): Conditional => ({
 })
 
 const loopRange = { min: 1, max: 9 }
-const wallOnRight = [{ predicate: { sensor: 'blocked', dir: 'right' }, label: 'wall on the right' }]
-const clearRight = [{ predicate: { sensor: 'clear', dir: 'right' }, label: 'Right is clear' }]
-const atGemOption = [{ predicate: { sensor: 'atGem' }, label: 'standing on a gem' }]
-const wallAbove = [{ predicate: { sensor: 'blocked', dir: 'up' }, label: 'wall above' }]
+const wallOnRight: PredicateOption[] = [{ predicate: { sensor: 'blocked', dir: 'right' }, label: 'wall on the right' }]
+const clearRight: PredicateOption[] = [{ predicate: { sensor: 'clear', dir: 'right' }, label: 'Right is clear' }]
+const atGemOption: PredicateOption[] = [{ predicate: { sensor: 'atGem' }, label: 'standing on a gem' }]
+const wallAbove: PredicateOption[] = [{ predicate: { sensor: 'blocked', dir: 'up' }, label: 'wall above' }]
 
 export const lesson2: Lesson = {
   id: 'lesson-4-if-else',

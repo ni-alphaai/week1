@@ -4,9 +4,11 @@
 // blocks, predicate options, loop range, card limits and nested solution, all of
 // which are passed straight through to the step.
 
-import type { GeneratedPuzzle, GenConcept, PuzzleTemplate } from '../ai/generation'
-import type { Action, Command, Lesson, MapConfig, SequenceStep, StepFeedback } from '../types'
+import type { GeneratedPuzzle, GeneratedConcept, GenConcept, PuzzleTemplate } from '../ai/generation'
+import type { ConditionalStep, Lesson, MapConfig, SequenceStep, StepFeedback } from '../types'
+import type { Action, Command } from '../types'
 import { isSequenceStep } from '../types'
+import { runInstructions } from '../engine/map'
 import type { DifficultyDirection } from '../adaptivity/difficulty'
 import { bandForDirection, targetLevelForDirection } from '../adaptivity/difficulty'
 
@@ -53,7 +55,7 @@ export function recordPracticePuzzle(lessonId: string, puzzle: GeneratedPuzzle):
   sessionGenerated.set(lessonId, [...list, puzzle].slice(-8))
 }
 
-export function priorGeneratedExemplars(lessonId: string): object[] {
+function priorGeneratedExemplars(lessonId: string): object[] {
   return (sessionGenerated.get(lessonId) ?? []).map(puzzleToExemplar)
 }
 
@@ -62,7 +64,7 @@ export function clearPracticeSession(lessonId: string): void {
 }
 
 // Convert a generated puzzle into the exemplar JSON shape the model reads.
-export function puzzleToExemplar(puzzle: GeneratedPuzzle): object {
+function puzzleToExemplar(puzzle: GeneratedPuzzle): object {
   const exemplar: Record<string, unknown> = {
     map: puzzle.map,
     availableCommands: puzzle.availableCommands,
@@ -94,7 +96,7 @@ function mapMechanicsFromStep(map: MapConfig, actions: Action[] | undefined): st
 
 // Describe special mechanics present in a lesson's authored puzzles so the
 // generator weaves them in — not just plain empty-grid mazes.
-export function mechanicsGuideForLesson(lesson: Lesson): string[] {
+function mechanicsGuideForLesson(lesson: Lesson): string[] {
   const seen = new Set<string>()
   for (const step of lesson.steps) {
     if (!isSequenceStep(step)) continue
@@ -147,7 +149,7 @@ export function mechanicsGuideForLesson(lesson: Lesson): string[] {
 // style. Only `sequence` steps carry a playable map/solution; concept and other
 // step types are skipped. Undefined fields are omitted rather than written as
 // explicit `undefined`, keeping the prompt JSON compact.
-export function authoredExemplarsForLesson(lesson: Lesson): object[] {
+function authoredExemplarsForLesson(lesson: Lesson): object[] {
   const exemplars: object[] = []
   for (const step of lesson.steps) {
     if (!isSequenceStep(step)) continue
@@ -202,7 +204,62 @@ export function buildPracticeTemplate(
 // already maps 'easier' to targetLevel 3 + the easier band, so this is a thin
 // wrapper.
 export function smallerVariantTemplate(lesson: Lesson): PuzzleTemplate | null {
-  return buildPracticeTemplate(lesson, { direction: 'easier' })
+  const template = buildPracticeTemplate(lesson, { direction: 'easier' })
+  if (!template) return null
+  // The remediation variant is a one-off easy puzzle, not part of the endless
+  // practice stream, so anti-repetition is irrelevant here. Crucially, drop the
+  // session "already generated" history: it fills up once the "Keep practicing"
+  // prefetch fires (past the lesson's midpoint — exactly the state a resuming
+  // learner returns to), and a non-empty priorGenerated tells the model to make
+  // the puzzle structurally different from all of them, which over-constrains an
+  // intentionally-easy puzzle into abstaining. Stripping it makes the variant
+  // generate identically whether starting fresh or resuming.
+  return { ...template, priorGenerated: [] }
+}
+
+// A deterministic, AI-free "smaller version": the lesson's own simplest authored
+// play step, converted to the GeneratedPuzzle shape. Authored steps are verified
+// content, and we re-run each solution through the engine here so we only ever
+// return a genuinely solvable puzzle. This is the reliability backbone of "Try a
+// smaller version" — it lets the feature work even when AI generation is
+// unavailable, slow, or abstains, so the affordance never just vanishes.
+// Returns null only when the lesson has no runnable authored play step.
+export function deriveSmallerVariantPuzzle(lesson: Lesson): GeneratedPuzzle | null {
+  const playSteps = lesson.steps.filter(
+    (s): s is SequenceStep | ConditionalStep => s.type === 'sequence' || s.type === 'conditional',
+  )
+  // Pick the easiest: the fewest actual moves its verified solution executes.
+  let best: { step: SequenceStep | ConditionalStep; moves: number } | null = null
+  for (const step of playSteps) {
+    const run = runInstructions(step.map, step.solution)
+    if (run.status !== 'success') continue
+    const moves = run.path.length - 1
+    if (!best || moves < best.moves) best = { step, moves }
+  }
+  if (!best) return null
+
+  const { step, moves } = best
+  const lessonConcept = conceptForLesson(lesson)
+  const concept: GeneratedConcept =
+    lessonConcept && lessonConcept !== 'mixed' ? lessonConcept : 'navigation'
+
+  return {
+    map: step.map,
+    availableCommands: step.availableCommands,
+    availableActions: step.availableActions,
+    blocks: step.blocks,
+    predicateOptions: step.predicateOptions,
+    loopRange: step.loopRange,
+    cardLimits: step.cardLimits,
+    solution: step.solution,
+    feedback: step.feedback,
+    optimal: moves,
+    difficulty: moves,
+    concept,
+    // Flows through toPracticeStep like a generated puzzle; the source map and
+    // solution are authored, but it is served via the same generated-practice path.
+    aiGenerated: true,
+  }
 }
 
 export function toPracticeStep(puzzle: GeneratedPuzzle, lesson: Lesson): SequenceStep {

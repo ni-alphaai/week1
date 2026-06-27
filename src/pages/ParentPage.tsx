@@ -9,11 +9,11 @@ import {
   stuckSteps,
   type MasteryTier,
 } from '../storage/progress'
-import { ArrowIcon, DropIcon, PickupIcon, BadgeIcon, FlameIcon, LockIcon } from '../components/icons'
+import { BadgeIcon, FlameIcon, LockIcon } from '../components/icons'
 import { ProgressRing } from '../components/ProgressRing'
 import { BADGES, BADGE_LABELS } from '../content/badges'
 import { aiEnabled } from '../ai/config'
-import { isAction } from '../types'
+import { avatarClass } from './HomePage'
 
 const SKILL_LABELS: Record<string, string> = {
   sequencing: 'Sequencing',
@@ -150,12 +150,12 @@ export function ParentPage() {
     <div className="mx-auto max-w-2xl px-4 py-8">
       <header className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#3b9ec9] text-base font-bold text-white shadow-sm">
+          <span className={`home-avatar ${avatarClass(name)}`}>
             {name.slice(0, 1).toUpperCase()}
           </span>
           <div>
-            <p className="text-xs text-muted">Progress for</p>
-            <h1 className="font-display text-xl font-bold text-[var(--color-text)]">{name}</h1>
+            <p className="page-eyebrow">Progress for</p>
+            <h1 className="page-title">{name}</h1>
           </div>
         </div>
         <Link to="/app" className="btn-ghost !px-3 !py-1.5 !text-sm">
@@ -178,7 +178,7 @@ export function ParentPage() {
       </section>
 
       <section className="mt-6">
-        <h2 className="section-label mb-2">Badges</h2>
+        <h2 className="section-title mb-2">Badges</h2>
         {badges.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {badges.map((id) => {
@@ -260,18 +260,15 @@ export function ParentPage() {
 
       {aiActivity && (
         <section className="mt-6">
-          <h2 className="section-label mb-2">Rico&apos;s help</h2>
+          <h2 className="section-title mb-2">How Rico helped</h2>
           <div className="card p-5">
             <p className="text-sm text-[var(--color-text)]">
-              Rico explained {usage.explainServed} mistake{usage.explainServed === 1 ? '' : 's'}, fell back to written
-              hints {usage.explainFallback} time{usage.explainFallback === 1 ? '' : 's'}, blocked{' '}
-              {usage.explainLeakBlocked} answer leak{usage.explainLeakBlocked === 1 ? '' : 's'}, and made{' '}
-              {usage.genServed} fresh puzzle{usage.genServed === 1 ? '' : 's'} ({usage.genAbstained} time
-              {usage.genAbstained === 1 ? '' : 's'} it couldn&apos;t).
-            </p>
-            <p className="mt-2 text-xs text-soft">
-              Rico only ever nudges — it never hands over the answer, and it falls back to authored hints whenever it is
-              unsure.
+              {usage.explainServed > 0
+                ? `When a puzzle got tricky, Rico sat with ${name} and talked it through ${usage.explainServed} time${usage.explainServed === 1 ? '' : 's'}`
+                : `Rico has been right there cheering ${name} on`}
+              {usage.genServed > 0
+                ? `, and dreamed up ${usage.genServed} brand-new puzzle${usage.genServed === 1 ? '' : 's'} to keep the adventure going.`
+                : '.'}
             </p>
           </div>
         </section>
@@ -279,7 +276,7 @@ export function ParentPage() {
 
       {stuck.length > 0 && (
         <section className="mt-6">
-          <h2 className="section-label mb-2">Where {name} is stuck</h2>
+          <h2 className="section-title mb-2">Where {name} is stuck</h2>
           <div className="space-y-2">
             {stuck.map((s) => (
               <div key={s.stepId} className="card p-4">
@@ -299,7 +296,7 @@ export function ParentPage() {
       )}
 
       <section className="mt-6">
-        <h2 className="section-label mb-2">Skills &amp; mastery</h2>
+        <h2 className="section-title mb-2">Skills &amp; mastery</h2>
         {skills.length === 0 ? (
           <p className="card p-4 text-sm text-muted">
             No practice yet. Progress shows up once {name} starts a lesson.
@@ -336,31 +333,6 @@ export function ParentPage() {
         )}
       </section>
 
-      <section className="mt-6">
-        <h2 className="section-label mb-2">Recent creations</h2>
-        {state.portfolio.length === 0 ? (
-          <p className="card p-4 text-sm text-muted">Solved puzzles will appear here as little programs.</p>
-        ) : (
-          <div className="space-y-2">
-            {state.portfolio.slice(0, 8).map((artifact) => (
-              <div key={artifact.id} className="card flex flex-wrap items-center gap-2 p-3">
-                <span className="mr-1 text-sm font-medium text-[var(--color-text)]">{artifact.lessonTitle}</span>
-                {artifact.commands.map((step, index) =>
-                  isAction(step) ? (
-                    step === 'pickup' ? (
-                      <PickupIcon key={index} className="h-4 w-4 text-[var(--color-task)]" />
-                    ) : (
-                      <DropIcon key={index} className="h-4 w-4 text-[var(--color-task)]" />
-                    )
-                  ) : (
-                    <ArrowIcon key={index} command={step} className="h-4 w-4 text-accent" />
-                  ),
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { playSound } from '../lib/sound'
 
 export type BirdMood = 'explain' | 'hint' | 'celebrate' | 'oops' | 'petted'
@@ -12,6 +12,14 @@ interface RicoBirdProps {
 /** Rico — green bird mascot inspired by Brilliant's cheerful guide style */
 export function RicoBird({ mood = 'explain', className = '', onClick }: RicoBirdProps) {
   const [isPetted, setIsPetted] = useState(false)
+  const petTimer = useRef<number | null>(null)
+
+  useEffect(
+    () => () => {
+      if (petTimer.current !== null) clearTimeout(petTimer.current)
+    },
+    [],
+  )
 
   const body = '#6bcb3d'
   const bodyLight = '#9ee070'
@@ -25,7 +33,8 @@ export function RicoBird({ mood = 'explain', className = '', onClick }: RicoBird
   function handleClick() {
     setIsPetted(true)
     playSound('pet')
-    setTimeout(() => setIsPetted(false), 800)
+    if (petTimer.current !== null) clearTimeout(petTimer.current)
+    petTimer.current = window.setTimeout(() => setIsPetted(false), 800)
     onClick?.()
   }
 
