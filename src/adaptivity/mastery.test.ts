@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { emptyLearnerState } from '../storage/types'
 import type { SkillStat } from '../storage/types'
+import type { Box } from './leitner'
 import { decayedSuccessRate, dueSkills, lessonMastery, lessonSuccessRate } from './mastery'
 
 const DAY = 24 * 60 * 60 * 1000
+const NOW = 100 * DAY
 
 function stat(over: Partial<SkillStat>): SkillStat {
   return {
@@ -69,33 +71,77 @@ describe('decayedSuccessRate', () => {
   })
 })
 
-describe('dueSkills', () => {
-  it('caps at three results ordered by lowest decayed rate', () => {
-    const now = 10_000_000_000
-    const state = emptyLearnerState('l1')
-    state.skillStats = {
-      a: stat({ attempts: 4, correct: 1, lastCorrectAt: now }), // raw 0.25
-      b: stat({ attempts: 4, correct: 2, lastCorrectAt: now }), // raw 0.5
-      c: stat({ attempts: 4, correct: 3, lastCorrectAt: now }), // raw 0.75 — above 0.7, not due
-      d: stat({ attempts: 4, correct: 0, lastCorrectAt: now }), // raw 0.0
-    }
-    const due = dueSkills(state, now)
-    expect(due).toHaveLength(3)
-    expect(due[0]).toBe('d') // lowest rate first
-    expect(due).toContain('a')
-    expect(due).toContain('b')
-    expect(due).not.toContain('c')
+// Helper: build a minimal LearnerState with given skillStats and review.boxes.
+function stateWith(
+  skillStatKeys: string[],
+  boxes: Record<string, { box: Box; lastReviewedAt: number }> = {},
+) {
+  const state = emptyLearnerState('l1')
+  for (const k of skillStatKeys) {
+    state.skillStats[k] = stat({ attempts: 2, correct: 1 })
+  }
+  state.review.boxes = boxes
+  return state
+}
+
+describe('dueSkills (Leitner)', () => {
+  it('bootstrapping: met skills with no box entry are immediately due', () => {
+    // The critical bootstrapping case: learner completed a lesson (skillStats populated)
+    // but has never reviewed (boxes === {}). dueSkills must NOT return [].
+    const state = stateWith(['loops', 'conditionals'])
+    const due = dueSkills(state, NOW)
+    expect(due).toContain('loops')
+    expect(due).toContain('conditionals')
   })
 
-  it('marks a skill due when the last correct answer is older than 7 days', () => {
-    const now = 10_000_000_000
-    const state = emptyLearnerState('l1')
-    state.skillStats = {
-      fresh: stat({ attempts: 4, correct: 4, lastCorrectAt: now - DAY }),
-      stale: stat({ attempts: 4, correct: 4, lastCorrectAt: now - 8 * DAY }),
-    }
-    const due = dueSkills(state, now)
-    expect(due).toContain('stale')
-    expect(due).not.toContain('fresh')
+  it('selects only skills whose box interval has elapsed', () => {
+    // loops: box 1 (interval 1 day), last reviewed 2 days ago → due
+    // conditionals: box 5 (interval 14 days), last reviewed 1 day ago → not due
+    const state = stateWith(['loops', 'conditionals'], {
+      loops: { box: 1, lastReviewedAt: NOW - 2 * DAY },
+      conditionals: { box: 5, lastReviewedAt: NOW - 1 * DAY },
+    })
+    const due = dueSkills(state, NOW)
+    expect(due).toEqual(['loops'])
+  })
+
+  it('caps results at the default 5, sorted by lastReviewedAt ascending', () => {
+    // 6 met skills, all in box 1 with lastReviewedAt 0 (never reviewed) → all due,
+    // but only 5 are returned. Since lastReviewedAt is identical (0), order among
+    // them is undefined; we just assert length === 5.
+    const state = stateWith(['a', 'b', 'c', 'd', 'e', 'f'])
+    expect(dueSkills(state, NOW)).toHaveLength(5)
+  })
+
+  it('honors the cap parameter', () => {
+    const state = stateWith(['a', 'b', 'c'])
+    expect(dueSkills(state, NOW, 2)).toHaveLength(2)
+  })
+
+  it('never-reviewed skills sort before recently-reviewed ones', () => {
+    // 'never' has no box entry; 'recent' was reviewed just now (box 1, not yet due)
+    // 'old' was reviewed 2 days ago (box 1, due)
+    const state = stateWith(['never', 'old', 'recent'], {
+      recent: { box: 1, lastReviewedAt: NOW },         // not due
+      old: { box: 1, lastReviewedAt: NOW - 2 * DAY }, // due
+      // 'never' has no entry → defaults to box 1 / null → due
+    })
+    const due = dueSkills(state, NOW)
+    expect(due).toContain('never')
+    expect(due).toContain('old')
+    expect(due).not.toContain('recent')
+    // never-reviewed sorts before old (null → 0 < any real timestamp)
+    expect(due.indexOf('never')).toBeLessThan(due.indexOf('old'))
+  })
+
+  it('skills not in skillStats are never returned even if they are in boxes', () => {
+    // boxes may have entries for skills the learner has never met; they must not appear
+    const state = stateWith(['met'], {
+      met: { box: 1, lastReviewedAt: NOW - 2 * DAY },
+      unmet: { box: 1, lastReviewedAt: NOW - 2 * DAY },
+    })
+    const due = dueSkills(state, NOW)
+    expect(due).toContain('met')
+    expect(due).not.toContain('unmet')
   })
 })

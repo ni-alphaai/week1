@@ -3,17 +3,16 @@
 // deterministic arithmetic, so it works with AI off and needs no new storage.
 
 import type { LearnerState, SkillStat } from '../storage/types'
-import { listLessons } from '../content/registry'
+import { isDue } from './leitner'
+import type { Box } from './leitner'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 // Half-life for success-rate decay, in days. After this many days without a
 // correct answer, the decayed success rate halves.
 const DECAY_HALF_LIFE_DAYS = 14
-// A skill is due if its decayed rate drops below this, or it has been longer
-// than this many days since the last correct answer.
-const DUE_RATE_THRESHOLD = 0.7
-const DUE_RECENCY_DAYS = 7
-const DUE_CAP = 3
+
+// Default cap on skills returned per dueSkills call.
+const DUE_CAP = 5
 
 export interface LessonMastery {
   attempts: number
@@ -50,53 +49,33 @@ export function decayedSuccessRate(stat: SkillStat | undefined, now = Date.now()
   return raw * Math.pow(0.5, days / DECAY_HALF_LIFE_DAYS)
 }
 
-// Up to DUE_CAP skill ids that warrant a review: decayed rate below threshold,
-// last correct answer older than the recency window, or seen-but-never-attempted
-// skills. Ordered by lowest decayed success rate first.
-export function dueSkills(state: LearnerState, now = Date.now()): string[] {
-  type Candidate = { skillId: string; rate: number; attempts: number; lastCorrectAt: number | null; seen: boolean }
-  const candidates = new Map<string, Candidate>()
+// Up to `cap` skill ids that are due for Leitner-scheduled review.
+//
+// Bootstrapping: we iterate the learner's *met skills* (Object.keys(state.skillStats))
+// rather than Object.keys(state.review.boxes). A fresh learner who has completed
+// lessons but never reviewed will have boxes === {} — if we iterated boxes, nothing
+// would ever be due. By iterating skillStats we treat every met skill as box-1/
+// never-reviewed when it has no box entry, so it is immediately due.
+//
+// Ordering: sort by lastReviewedAt ascending, never-reviewed (null → 0) first,
+// so the session order is deterministic and testable.
+// Note for future multi-item-per-skill: interleaving same-skill adjacency prevention
+// would be added to this sort when box entries can contain multiple items.
+export function dueSkills(state: LearnerState, now = Date.now(), cap = DUE_CAP): string[] {
+  const boxes = state.review?.boxes ?? {}
+  type Entry = { skillId: string; lastReviewedAt: number }
+  const due: Entry[] = []
 
-  for (const [skillId, stat] of Object.entries(state.skillStats)) {
-    candidates.set(skillId, {
-      skillId,
-      rate: decayedSuccessRate(stat, now),
-      attempts: stat.attempts,
-      lastCorrectAt: stat.lastCorrectAt ?? null,
-      seen: stat.attempts > 0,
-    })
-  }
-
-  // Skills the learner has seen (any stepStat for a step teaching them) but
-  // that have no skillStat yet — i.e. encountered but not yet attempted.
-  for (const lesson of listLessons()) {
-    const hasStepStat = lesson.steps.some((s) => state.stepStats[s.id] != null)
-    if (!hasStepStat) continue
-    for (const skillId of lesson.skillIds) {
-      if (candidates.has(skillId)) {
-        candidates.get(skillId)!.seen = true
-        continue
-      }
-      const stat = state.skillStats[skillId]
-      candidates.set(skillId, {
-        skillId,
-        rate: decayedSuccessRate(stat, now),
-        attempts: stat?.attempts ?? 0,
-        lastCorrectAt: stat?.lastCorrectAt ?? null,
-        seen: true,
-      })
+  for (const skillId of Object.keys(state.skillStats)) {
+    const entry = boxes[skillId] ?? null
+    const box: Box = entry?.box ?? 1
+    const lastReviewedAt: number | null = entry?.lastReviewedAt ?? null
+    if (isDue(box, lastReviewedAt, now)) {
+      due.push({ skillId, lastReviewedAt: lastReviewedAt ?? 0 })
     }
   }
 
-  const due: Candidate[] = []
-  for (const c of candidates.values()) {
-    const stale =
-      c.lastCorrectAt != null && now - c.lastCorrectAt > DUE_RECENCY_DAYS * DAY_MS
-    const seenButUnattempted = c.attempts === 0 && c.seen
-    if (c.rate < DUE_RATE_THRESHOLD || stale || seenButUnattempted) {
-      due.push(c)
-    }
-  }
-  due.sort((a, b) => a.rate - b.rate)
-  return due.slice(0, DUE_CAP).map((c) => c.skillId)
+  // Soonest-due first: never-reviewed (lastReviewedAt=0) sorts before any real timestamp.
+  due.sort((a, b) => a.lastReviewedAt - b.lastReviewedAt)
+  return due.slice(0, cap).map((e) => e.skillId)
 }
