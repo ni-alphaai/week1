@@ -404,38 +404,39 @@ export function ReviewPage() {
             />
           </div>
           <h1 className="page-title">All caught up!</h1>
-          {completedCount > 0 ? (
+          {recapRef.current && recapRef.current.length > 0 ? (
             <>
-              <p className="mt-2 text-muted">
-                Nice reviewing — you finished {completedCount} review{completedCount === 1 ? '' : 's'} today.
-              </p>
-              {/* Mastery recap: per-skill box change and tier */}
-              {recapRef.current && recapRef.current.length > 0 && (
-                <div className="mt-4 space-y-2 text-left" data-testid="mastery-recap">
-                  {recapRef.current.map(({ skillId, beforeBox }) => {
-                    const skillStat = state.skillStats[skillId]
-                    const tier = masteryTier(skillStat)
-                    const afterBox = state.review?.boxes?.[skillId]?.box ?? beforeBox
-                    const boxChanged = afterBox !== beforeBox
-                    const promoted = afterBox > beforeBox
-                    return (
-                      <div key={skillId} className="flex items-center justify-between rounded-lg bg-surface-alt px-3 py-2">
-                        <span className="font-medium capitalize">{skillId}</span>
-                        <span className="flex items-center gap-2 text-sm text-muted">
-                          {boxChanged ? (
-                            <span>
-                              Box {beforeBox}→{afterBox} {promoted ? '↑' : '↓'}
-                            </span>
-                          ) : (
-                            <span>Box {beforeBox}</span>
-                          )}
-                          <span className="step-badge">{tier}</span>
-                        </span>
-                      </div>
-                    )
-                  })}
-                </div>
+              {completedCount > 0 && (
+                <p className="mt-2 text-muted">
+                  Nice reviewing — you finished {completedCount} review{completedCount === 1 ? '' : 's'} today.
+                </p>
               )}
+              {/* Mastery recap: per-skill box change and tier — shown for all sessions
+                  (solved OR failed) so box resets are always visible. */}
+              <div className="mt-4 space-y-2 text-left" data-testid="mastery-recap">
+                {recapRef.current.map(({ skillId, beforeBox }) => {
+                  const skillStat = state.skillStats[skillId]
+                  const tier = masteryTier(skillStat)
+                  const afterBox = state.review?.boxes?.[skillId]?.box ?? beforeBox
+                  const boxChanged = afterBox !== beforeBox
+                  const promoted = afterBox > beforeBox
+                  return (
+                    <div key={skillId} className="flex items-center justify-between rounded-lg bg-surface-alt px-3 py-2">
+                      <span className="font-medium capitalize">{skillId}</span>
+                      <span className="flex items-center gap-2 text-sm text-muted">
+                        {boxChanged ? (
+                          <span>
+                            Box {beforeBox}→{afterBox} {promoted ? '↑' : '↓'}
+                          </span>
+                        ) : (
+                          <span>Box {beforeBox}</span>
+                        )}
+                        <span className="step-badge">{tier}</span>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
             </>
           ) : (
             <p className="mt-2 text-muted">Nothing to review today. Come back tomorrow!</p>

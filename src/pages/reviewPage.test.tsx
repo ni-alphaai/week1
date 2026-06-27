@@ -33,6 +33,8 @@ const holder = vi.hoisted(() => {
     deliverState: null as null | ((s: LearnerState) => void),
     // Settle handle: allows tests to trigger a run outcome directly.
     triggerSettle: null as null | ((outcome: RunOutcome) => void),
+    // Last state snapshot after recordReview mutates it — lets tests assert box resets.
+    lastState: null as null | LearnerState,
   }
 })
 
@@ -182,6 +184,7 @@ vi.mock('../context/LearnerContext', async () => {
             const base = prev ?? emptyLearnerState('kid-1')
             const next = progressMod.recordReview(base, lesson, skillId, stepId, correct)
             holder.recordReview(lesson, skillId, stepId, correct)
+            holder.lastState = next
             return next
           })
         },
@@ -287,6 +290,7 @@ beforeEach(() => {
   holder.recordReview.mockReset()
   holder.deliverState = null
   holder.triggerSettle = null
+  holder.lastState = null
 })
 
 describe('ReviewPage (AI off)', () => {
@@ -335,5 +339,41 @@ describe('ReviewPage (AI off)', () => {
     expect(call[1]).toBe('loops')                                 // skillId
     expect(call[2]).toBe(holder.loopPuzzle.id)                    // stepId
     expect(call[3]).toBe(false)                                   // correct=false (wrong run)
+  })
+
+  it('recap shows box reset to 1 after a wrong run (box 3→1 ↓)', async () => {
+    renderReview()
+    act(() => holder.deliverState!(seededState()))
+
+    // Wait for the puzzle to appear.
+    expect(await screen.findByText('Use a loop to reach the treasure!')).toBeInTheDocument()
+
+    // Trigger a failed run.
+    await act(async () => {
+      holder.triggerSettle!({
+        solved: false,
+        run: { steps: [], status: 'stuck' } as any,
+        feedback: { status: 'incorrect', message: 'That path was wrong.' },
+      })
+    })
+
+    // Wait for the "Finish review" button to appear (only item in queue → index+1 >= queue.length).
+    const finishBtn = await screen.findByRole('button', { name: /Finish review/i })
+
+    // Click to advance to the recap screen.
+    await act(async () => {
+      finishBtn.click()
+    })
+
+    // Recap must be visible.
+    await screen.findByTestId('mastery-recap')
+
+    // Box was at 3 before the session; a wrong run resets to 1.
+    expect(screen.getByText(/Box 3→1/)).toBeInTheDocument()
+
+    // Storage state reflects the reset: box should now be 1.
+    await waitFor(() => {
+      expect(holder.lastState?.review?.boxes?.['loops']?.box).toBe(1)
+    })
   })
 })
