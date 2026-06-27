@@ -48,7 +48,19 @@ const TIER_EMISSIVE: Record<BadgeTier, number> = {
 // resolve null and the caller falls back to a plain tier-tinted disc. The
 // unique emblem still shows in the DOM 2D fallback and the detail card, so this
 // is an acceptable, documented degrade.
-function makeEmblemTexture(badgeId: string, tier: BadgeTier): Promise<THREE.CanvasTexture | null> {
+//
+// `pendingUrls` is a Set owned by the scene closure. Each object URL is added
+// before `img.src` is set and removed (+ revoked) inside the handlers. If
+// dispose() fires while an Image is still loading, it revokes all remaining
+// entries so no URL leaks even when the handler never fires. `isDisposed` is a
+// ref-cell so the in-flight callback can read the disposed state at the time it
+// eventually runs.
+function makeEmblemTexture(
+  badgeId: string,
+  tier: BadgeTier,
+  pendingUrls: Set<string>,
+  isDisposed: { current: boolean },
+): Promise<THREE.CanvasTexture | null> {
   return new Promise((resolve) => {
     try {
       const svg = renderToStaticMarkup(emblemFor(badgeId, undefined))
@@ -58,8 +70,15 @@ function makeEmblemTexture(badgeId: string, tier: BadgeTier): Promise<THREE.Canv
         .replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" style="color:#fff"')
       const blob = new Blob([sized], { type: 'image/svg+xml' })
       const url = URL.createObjectURL(blob)
+      pendingUrls.add(url)
       const img = new Image()
       img.onload = () => {
+        pendingUrls.delete(url)
+        URL.revokeObjectURL(url)
+        if (isDisposed.current) {
+          resolve(null)
+          return
+        }
         try {
           const size = 256
           const c = document.createElement('canvas')
@@ -67,7 +86,6 @@ function makeEmblemTexture(badgeId: string, tier: BadgeTier): Promise<THREE.Canv
           c.height = size
           const ctx = c.getContext('2d')
           if (!ctx) {
-            URL.revokeObjectURL(url)
             resolve(null)
             return
           }
@@ -79,17 +97,16 @@ function makeEmblemTexture(badgeId: string, tier: BadgeTier): Promise<THREE.Canv
           ctx.fill()
           const pad = size * 0.22
           ctx.drawImage(img, pad, pad, size - pad * 2, size - pad * 2)
-          URL.revokeObjectURL(url)
           const tex = new THREE.CanvasTexture(c)
           tex.colorSpace = THREE.SRGBColorSpace
           tex.anisotropy = 4
           resolve(tex)
         } catch {
-          URL.revokeObjectURL(url)
           resolve(null)
         }
       }
       img.onerror = () => {
+        pendingUrls.delete(url)
         URL.revokeObjectURL(url)
         resolve(null)
       }
@@ -158,9 +175,15 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
   const faceMaterials = new Map<string, THREE.MeshStandardMaterial>()
   const faceTextures: THREE.CanvasTexture[] = []
   let disposed = false
+  // Ref-cell threaded into makeEmblemTexture so in-flight handlers can check
+  // the disposed state at the time they eventually run.
+  const isDisposed = { current: false }
+  // Object URLs that have been created but whose Image hasn't loaded yet.
+  // dispose() will revoke any still-pending ones to prevent URL leaks.
+  const pendingUrls = new Set<string>()
 
   for (const tile of tiles) {
-    void makeEmblemTexture(tile.badgeId, tile.tier).then((tex) => {
+    void makeEmblemTexture(tile.badgeId, tile.tier, pendingUrls, isDisposed).then((tex) => {
       if (disposed || !tex) {
         tex?.dispose()
         return
@@ -219,8 +242,13 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
   return {
     dispose() {
       disposed = true
+      isDisposed.current = true
       running = false
       cancelAnimationFrame(raf)
+      // Revoke any object URLs whose Image.onload/onerror hasn't fired yet so
+      // they don't leak if this scene is torn down mid-load.
+      for (const url of pendingUrls) URL.revokeObjectURL(url)
+      pendingUrls.clear()
       geometry.dispose()
       for (const tier of Object.keys(tierMaterials) as BadgeTier[]) tierMaterials[tier].dispose()
       for (const fm of faceMaterials.values()) fm.dispose()
