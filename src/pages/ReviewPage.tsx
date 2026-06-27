@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { Lesson, MapConfig, SequenceStep } from '../types'
+import type { Lesson, MapConfig } from '../types'
 import { useLearner } from '../context/LearnerContext'
-import { getLesson, registerGeneratedPuzzle } from '../content/registry'
+import { registerGeneratedPuzzle } from '../content/registry'
+import { listLessons } from '../content/registry'
 import { checkProgram } from '../engine/checker'
 import { MapGrid } from '../components/MapGrid'
 import { CommandSequence } from '../components/CommandSequence'
@@ -22,35 +23,84 @@ import { aiGenerationOn } from '../ai/config'
 import { useAiEnabled } from '../lib/useAiEnabled'
 import { toPracticeStep, conceptForLesson } from '../content/generated'
 import { warmReview, warmReviewAhead, clearReview } from '../ai/reviewPrefetch'
+import { dueSkills } from '../adaptivity/mastery'
+import { reviewItemForSkill } from '../content/reviewItems'
+import type { ReviewItem } from '../content/reviewItems'
+import { supportLevel, difficultyForBox } from '../adaptivity/leitner'
+import type { Box } from '../adaptivity/leitner'
+import { masteryTier } from '../storage/progress'
+import type { SequenceStep, ConditionalStep } from '../types'
+import { isSequenceStep, isConditionalStep } from '../types'
 
 // Stand-in map for the hook before a review puzzle has loaded (the player isn't
 // shown until `step` exists, so no Run ever plays on it).
 const FALLBACK_MAP: MapConfig = { rows: 1, cols: 1, start: { row: 0, col: 0 }, goal: { row: 0, col: 0 } }
 
+// Per-skill recap entry: captured at session start (before boxes mutate).
+interface RecapEntry {
+  skillId: string
+  beforeBox: Box
+}
 
-function initialNodesFor(step: SequenceStep): ProgramNode[] {
-  if (!step.initialProgram) return []
-  return step.initialProgram.map((inst) => instructionToNode(inst, !step.editableInitial))
+// Resolve the backing lesson for a skill id — same scan as authoredItemForSkill.
+function lessonForSkill(skillId: string): Lesson | null {
+  for (const lesson of listLessons()) {
+    if (lesson.skillIds.includes(skillId)) return lesson
+  }
+  return null
+}
+
+// Convert an authored ReviewItem puzzle into a playable SequenceStep shape,
+// honouring blankEditor: always start with an empty program.
+function puzzleToStep(item: ReviewItem): SequenceStep | ConditionalStep {
+  return item.puzzle
+}
+
+function initialNodesFor(step: SequenceStep | ConditionalStep): ProgramNode[] {
+  // blankEditor: always start empty regardless of any initialProgram.
+  return []
+}
+
+// Convert difficultyForBox's absolute level (3/4/5) to a DifficultyDirection
+// for buildPracticeTemplate.
+function boxToDirection(box: Box): 'easier' | 'same' | 'harder' {
+  const level = difficultyForBox(box)
+  if (level <= 3) return 'easier'
+  if (level === 4) return 'same'
+  return 'harder'
 }
 
 export function ReviewPage() {
   useAiEnabled() // re-renders on AI Preference change
-  const { ready, activeLearner, state, recordReview } = useLearner()
+  const { ready, activeLearner, state, recordReview, refreshReviewQueue } = useLearner()
 
-  // Snapshot the due queue once: recordReview replaces the state object, but the
-  // queue itself only changes on the once-a-day refresh, so advancing through a
-  // captured copy keeps the session stable.
+  // Snapshot the due-skills queue once per session (computed from dueSkills at
+  // mount time). Using a ref prevents the session from reshuffling mid-play when
+  // recordReview mutates state (which would recompute dueSkills).
   const queueRef = useRef<string[] | null>(null)
+  // Capture per-skill box before any recording, for the recap end screen.
+  const recapRef = useRef<RecapEntry[] | null>(null)
+
   if (queueRef.current === null && state) {
-    queueRef.current = [...(state.review?.dueQueue ?? [])]
+    const now = Date.now()
+    const skills = dueSkills(state, now)
+    queueRef.current = skills
+    recapRef.current = skills.map((skillId) => ({
+      skillId,
+      beforeBox: (state.review?.boxes?.[skillId]?.box ?? 1) as Box,
+    }))
   }
+
   const queue = queueRef.current ?? []
 
   const [index, setIndex] = useState(0)
-  const [step, setStep] = useState<SequenceStep | null>(null)
+  const [currentItem, setCurrentItem] = useState<ReviewItem | null>(null)
+  const [currentLesson, setCurrentLesson] = useState<Lesson | null>(null)
   const [loading, setLoading] = useState(true)
   const [done, setDone] = useState(false)
   const [completedCount, setCompletedCount] = useState(0)
+  // outcome tracks the terminal result for the current item (null = not settled yet).
+  const [outcome, setOutcome] = useState<'solved' | 'failed' | null>(null)
 
   const [program, setProgram] = useState<ProgramNode[]>([])
   const [iterations, setIterations] = useState<Map<string, number> | null>(null)
@@ -61,12 +111,8 @@ export function ReviewPage() {
   const busyRef = useRef(false)
   const loadedRef = useRef(false)
   const isMounted = useRef(true)
-  // Guards the one-time success side effects (record, count, celebrate) so a
-  // re-run of an already-solved puzzle can't double count. Reset on each load.
+  // Guards one-time outcome recording per item — reset on each load.
   const recordedRef = useRef(false)
-  // The lesson backing the puzzle currently on screen, for recordReview on solve.
-  const currentLessonRef = useRef<Lesson | null>(null)
-  const startedAtRef = useRef<number>(Date.now())
   // Keep a live handle on state so the difficulty read isn't stale in the loader.
   const stateRef = useRef(state)
   useEffect(() => {
@@ -86,6 +132,9 @@ export function ReviewPage() {
     }
   }, [])
 
+  // The step we pass to the engine — derived from currentItem.
+  const step = currentItem ? puzzleToStep(currentItem) : null
+
   const run = usePuzzleRun({
     map: step?.map ?? FALLBACK_MAP,
     check: () =>
@@ -98,42 +147,52 @@ export function ReviewPage() {
       setCelebrate(false)
       mapColumnRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
     },
-    onSettle: (outcome) => {
-      setIterations(iterationMap(program, outcome.run))
-      if (!outcome.solved) return
-      setCelebrate(true)
-      const clearCelebrate = window.setTimeout(() => setCelebrate(false), 2000)
-      timers.current.push(clearCelebrate)
-      // Record/count only on the first correct solve of this puzzle, so a re-run
-      // of an already-solved puzzle can't double count.
-      const lesson = currentLessonRef.current
-      if (lesson && step && !recordedRef.current) {
+    onSettle: (settleOutcome) => {
+      setIterations(iterationMap(program, settleOutcome.run))
+
+      // Record the terminal outcome exactly once per item (first settle wins).
+      // This covers both correct and incorrect — wrong runs record box reset,
+      // correct runs record box promote. Subsequent retries after a fail are
+      // cosmetic-only (no re-record).
+      if (!recordedRef.current && currentItem && currentLesson) {
         recordedRef.current = true
-        recordReview(lesson, lesson.skillIds[0], step.id, true)
-        setCompletedCount((c) => c + 1)
-        clearReview(lesson.id)
+        const solved = settleOutcome.solved
+
+        // Record review (both outcomes: correct and incorrect).
+        recordReview(currentLesson, currentItem.skillId, currentItem.puzzle.id, solved)
+
+        if (solved) {
+          setCelebrate(true)
+          const clearCelebrate = window.setTimeout(() => setCelebrate(false), 2000)
+          timers.current.push(clearCelebrate)
+          setCompletedCount((c) => c + 1)
+          setOutcome('solved')
+          clearReview(currentLesson.id)
+        } else {
+          setOutcome('failed')
+        }
       }
     },
   })
 
   const resetPlayState = useCallback(() => {
-    // The run resets itself when the new puzzle's map loads (usePuzzleRun's
-    // map-change effect); here we only clear the page-owned state around it.
     clearTimers()
     setIterations(null)
     setCelebrate(false)
     setProgram([])
+    setOutcome(null)
   }, [clearTimers])
 
-  // Keep the next few reviewable lessons warming in the background so advancing
-  // through the queue stays instant.
+  // Keep the next few review lessons warming in the background (AI path only).
   const warmAhead = useCallback((q: string[], from: number) => {
-    warmReviewAhead(q, from, stateRef.current)
+    if (!aiGenerationOn()) return
+    // Map skill ids back to lesson ids for the prefetch API.
+    const lessonQueue = q.map((skillId) => lessonForSkill(skillId)?.id ?? '').filter(Boolean)
+    warmReviewAhead(lessonQueue, from, stateRef.current)
   }, [])
 
-  // Loads the next reviewable puzzle, starting at queue position `start`. Walks
-  // forward over lessons with no generator concept or that abstain, so a single
-  // dud doesn't strand the learner. When nothing is left, shows "all caught up".
+  // Load the review item at queue position `start`.
+  // Authored path: always uses reviewItemForSkill. AI upgrade: only when aiGenerationOn().
   const loadReview = useCallback(
     async (start: number) => {
       if (busyRef.current) return
@@ -141,68 +200,97 @@ export function ReviewPage() {
       try {
         const q = queueRef.current ?? []
         setLoading(true)
-        setStep(null)
+        setCurrentItem(null)
+        setCurrentLesson(null)
         resetPlayState()
 
         let cursor = start
+
         while (cursor < q.length) {
-          const lesson = getLesson(q[cursor])
-          if (!lesson || conceptForLesson(lesson) === null) {
+          const skillId = q[cursor]
+          const boxEntry = stateRef.current?.review?.boxes?.[skillId] ?? null
+          const box: Box = (boxEntry?.box ?? 1) as Box
+          const lesson = lessonForSkill(skillId)
+
+          if (!lesson) {
             cursor += 1
             continue
           }
-          // Consume the background-prefetched puzzle (warmReview is idempotent,
-          // so this resolves instantly when Home already warmed it).
-          const puzzle = await warmReview(lesson, stateRef.current)
+
+          let item: ReviewItem
+          try {
+            item = reviewItemForSkill(skillId, box)
+          } catch {
+            // No authored puzzle for this skill — skip it.
+            cursor += 1
+            continue
+          }
+
+          // AI upgrade: when generation is on, swap in a generated variant at
+          // box-appropriate difficulty. Falls back to authored if generation
+          // abstains or fails.
+          if (aiGenerationOn() && conceptForLesson(lesson) !== null) {
+            try {
+              // warmReview uses the per-lesson cache from reviewPrefetch.
+              const generated = await warmReview(lesson, stateRef.current)
+              if (!isMounted.current) return
+              if (generated) {
+                registerGeneratedPuzzle(`review-${lesson.id}`, generated)
+                const practiceStep = toPracticeStep(generated, lesson)
+                if (practiceStep && (isSequenceStep(practiceStep as any) || isConditionalStep(practiceStep as any))) {
+                  item = {
+                    skillId,
+                    box,
+                    puzzle: practiceStep as unknown as SequenceStep,
+                    source: 'generated',
+                    blankEditor: true,
+                  }
+                }
+              }
+            } catch {
+              // Generation failed — keep the authored item.
+            }
+          }
+
           if (!isMounted.current) return
-          if (!puzzle) {
-            clearReview(lesson.id)
-            cursor += 1
-            continue
-          }
-          // Register for the leak guard, mirroring PracticePage.
-          registerGeneratedPuzzle(`review-${lesson.id}`, puzzle)
-          const practiceStep = toPracticeStep(puzzle, lesson)
-          currentLessonRef.current = lesson
+
           recordedRef.current = false
-          setStep(practiceStep)
-          setProgram(initialNodesFor(practiceStep))
-          startedAtRef.current = Date.now()
+          setCurrentItem(item)
+          setCurrentLesson(lesson)
+          setProgram(initialNodesFor(item.puzzle))
           setIndex(cursor)
-          // Keep the next few reviewable lessons warm so advancing feels instant.
           warmAhead(q, cursor + 1)
           return
         }
 
-        // Exhausted the queue (or every remaining lesson abstained).
+        // Exhausted all items.
         setIndex(q.length)
         setDone(true)
       } catch {
-        // An unexpected failure (e.g. a generator throwing) must not strand the
-        // learner on an endless spinner — fall back to the "all caught up"
-        // terminal screen so the Exit path stays reachable.
         if (isMounted.current) setDone(true)
       } finally {
         if (isMounted.current) setLoading(false)
         busyRef.current = false
       }
     },
-    [resetPlayState, warmAhead],
+    [resetPlayState, warmAhead, recordReview],
   )
 
   useEffect(() => {
-    if (!ready || !activeLearner) return
-    if (!aiGenerationOn()) return
+    if (!ready || !activeLearner || !state) return
     if (loadedRef.current) return
     loadedRef.current = true
-    if (queue.length === 0) {
+    // queue is snapshotted from state above (queueRef); by the time this effect
+    // runs with a non-null state, queueRef.current is already populated.
+    const q = queueRef.current ?? []
+    if (q.length === 0) {
       setDone(true)
       setLoading(false)
       return
     }
     void loadReview(0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, activeLearner, queue.length])
+  }, [ready, activeLearner, state])
 
   const paletteItems = useMemo(() => (step ? buildPalette(step) : []), [step])
 
@@ -213,11 +301,15 @@ export function ReviewPage() {
     setCelebrate(false)
   }
 
-  // Reset clears the placed blocks back to the puzzle's starting program (not
-  // just the run visuals), so the kid gets a clean slate to try again.
+  // Reset clears the placed blocks back to empty (blankEditor).
   function handleReset() {
-    if (step) setProgram(initialNodesFor(step))
+    setProgram([])
     resetRun()
+    // Allow re-recording if the user resets after a wrong run — they get another
+    // attempt without re-recording.
+    // NOTE: We do NOT reset recordedRef here: if outcome was already recorded we
+    // don't want to double-count. The "faded" re-attempt after fail is purely
+    // cosmetic. For consistent UX, keep the outcome locked once recorded.
   }
 
   function handleProgramChange(next: ProgramNode[]) {
@@ -225,10 +317,22 @@ export function ReviewPage() {
     resetRun()
   }
 
+  // Scaffolding level from the item's Leitner box.
+  const scaffold = currentItem ? supportLevel(currentItem.box) : null
+
   function bird(): { message: string; mood: BirdMood } {
     if (run.feedback?.status === 'correct') return { message: run.feedback.message, mood: 'celebrate' }
-    if (run.feedback?.status === 'incorrect') return { message: run.feedback.message, mood: 'oops' }
-    if (step) return { message: step.prompt, mood: 'explain' }
+    if (run.feedback?.status === 'incorrect') {
+      // For 'faded' items, only show explain after a wrong run (not up-front).
+      return { message: run.feedback.message, mood: 'oops' }
+    }
+    if (step) {
+      // For 'supported': show hints up-front in the prompt.
+      if (scaffold === 'supported' && step.feedback?.hints?.length) {
+        return { message: `${step.prompt} Hint: ${step.feedback.hints[0]}`, mood: 'explain' }
+      }
+      return { message: step.prompt, mood: 'explain' }
+    }
     return { message: 'Let me pull up something to review…', mood: 'explain' }
   }
 
@@ -265,21 +369,6 @@ export function ReviewPage() {
     )
   }
 
-  if (!aiGenerationOn()) {
-    return (
-      <div className="lesson-shell mx-auto px-4 pb-20 pt-6 lg:pb-8">
-        {header}
-        <div className="reward-card mx-auto max-w-md p-8 text-center">
-          <h1 className="page-title">Review is turned off</h1>
-          <p className="mt-2 text-muted">Daily review puzzles need AI to be switched on.</p>
-          <Link to="/app" className="btn-primary mt-6 inline-block">
-            Back home
-          </Link>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="lesson-shell mx-auto px-4 pb-20 pt-6 lg:pb-8">
       <BadgeToast />
@@ -298,9 +387,10 @@ export function ReviewPage() {
 
       {loading ? (
         <div className="reward-card mx-auto max-w-md p-8 text-center">
-          <BirdGuide message="Give me a sec — I'm dreaming up a fresh puzzle just for you…" mood="explain" typewriter={false} />
+          <BirdGuide message="Give me a sec — I'm pulling up your next review…" mood="explain" typewriter={false} />
         </div>
-      ) : done || !step ? (
+      ) : done || (!currentItem && !loading) ? (
+        // Session end: show mastery recap if we reviewed anything, or "All caught up".
         <div className="reward-card mx-auto max-w-md p-8 text-center">
           <div className="reward-stage reward-stage--sm mx-auto mb-1">
             <TreasureChestReward
@@ -314,11 +404,42 @@ export function ReviewPage() {
             />
           </div>
           <h1 className="page-title">All caught up!</h1>
-          <p className="mt-2 text-muted">
-            {completedCount > 0
-              ? `Nice reviewing — you finished ${completedCount} review${completedCount === 1 ? '' : 's'} today.`
-              : 'Nothing to review today. Come back tomorrow!'}
-          </p>
+          {completedCount > 0 ? (
+            <>
+              <p className="mt-2 text-muted">
+                Nice reviewing — you finished {completedCount} review{completedCount === 1 ? '' : 's'} today.
+              </p>
+              {/* Mastery recap: per-skill box change and tier */}
+              {recapRef.current && recapRef.current.length > 0 && (
+                <div className="mt-4 space-y-2 text-left" data-testid="mastery-recap">
+                  {recapRef.current.map(({ skillId, beforeBox }) => {
+                    const skillStat = state.skillStats[skillId]
+                    const tier = masteryTier(skillStat)
+                    const afterBox = state.review?.boxes?.[skillId]?.box ?? beforeBox
+                    const boxChanged = afterBox !== beforeBox
+                    const promoted = afterBox > beforeBox
+                    return (
+                      <div key={skillId} className="flex items-center justify-between rounded-lg bg-surface-alt px-3 py-2">
+                        <span className="font-medium capitalize">{skillId}</span>
+                        <span className="flex items-center gap-2 text-sm text-muted">
+                          {boxChanged ? (
+                            <span>
+                              Box {beforeBox}→{afterBox} {promoted ? '↑' : '↓'}
+                            </span>
+                          ) : (
+                            <span>Box {beforeBox}</span>
+                          )}
+                          <span className="step-badge">{tier}</span>
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="mt-2 text-muted">Nothing to review today. Come back tomorrow!</p>
+          )}
           <Link to="/app" className="btn-primary mt-6 inline-block">
             Back home
           </Link>
@@ -327,21 +448,37 @@ export function ReviewPage() {
         <section className="lesson-play-layout">
           <aside className="lesson-guide-panel space-y-3">
             <BirdGuide {...bird()} variant="sidebar" />
+            {/* Neutral: show hints on request (below the bird) */}
+            {scaffold === 'neutral' && step?.feedback?.hints && step.feedback.hints.length > 0 && !run.solved && !outcome && (
+              <details className="rounded-lg border border-border px-3 py-2 text-sm">
+                <summary className="cursor-pointer text-muted">Need a hint?</summary>
+                <ul className="mt-2 space-y-1 text-muted">
+                  {step.feedback.hints.map((h, i) => (
+                    <li key={i}>{h}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </aside>
 
           <div className="lesson-workspace space-y-4">
             <div className="puzzle-header puzzle-header--compact">
               <p className="section-label inline-flex items-center gap-1">
                 <SparkleIcon className="h-3.5 w-3.5" /> Review puzzle
+                {currentItem && (
+                  <span className="ml-1 text-xs text-muted">
+                    · Box {currentItem.box} · {scaffold === 'supported' ? 'Guided' : scaffold === 'neutral' ? 'Standard' : 'Challenge'}
+                  </span>
+                )}
               </p>
-              <h1 className="puzzle-goal">{step.goal}</h1>
-              <ObjectivesChips map={step.map} />
+              <h1 className="puzzle-goal">{step?.goal}</h1>
+              {step && <ObjectivesChips map={step.map} />}
             </div>
 
             <div className="lesson-workspace__main">
               <div className="lesson-map-column" ref={mapColumnRef}>
                 <MapGrid
-                  map={step.map}
+                  map={step?.map ?? FALLBACK_MAP}
                   {...run.frame}
                   crashed={run.crashed}
                   solved={run.solved}
@@ -353,15 +490,15 @@ export function ReviewPage() {
                 {run.animating && run.chips.length > 0 ? (
                   <RunStrip chips={run.chips} activeIndex={run.frame.activeStepIndex} />
                 ) : (
-                <CommandSequence
-                  palette={paletteItems}
-                  program={program}
-                  disabled={run.animating}
-                  loopRange={step.loopRange}
-                  predicateOptions={step.predicateOptions}
-                  onChange={handleProgramChange}
-                  iterations={iterations ?? undefined}
-                />
+                  <CommandSequence
+                    palette={paletteItems}
+                    program={program}
+                    disabled={run.animating}
+                    loopRange={step?.loopRange}
+                    predicateOptions={step?.predicateOptions}
+                    onChange={handleProgramChange}
+                    iterations={iterations ?? undefined}
+                  />
                 )}
 
                 <div className="action-bar">
@@ -384,12 +521,35 @@ export function ReviewPage() {
                   </Link>
                 </div>
 
-                {run.feedback?.status === 'correct' && (
+                {/* Advance affordances */}
+                {outcome === 'solved' && (
                   <div className="next-bar">
                     <button
                       type="button"
                       onClick={() => void loadReview(index + 1)}
                       className="btn-primary animate-pop-in"
+                    >
+                      {index + 1 < queue.length ? 'Next review' : 'Finish review'}
+                    </button>
+                  </div>
+                )}
+                {outcome === 'failed' && (
+                  <div className="next-bar flex gap-2">
+                    {/* Faded: explain after wrong run */}
+                    {scaffold === 'faded' && step?.feedback?.hints && step.feedback.hints.length > 0 && (
+                      <details className="rounded-lg border border-border px-3 py-2 text-sm">
+                        <summary className="cursor-pointer text-muted">See hint</summary>
+                        <ul className="mt-1 space-y-1 text-muted">
+                          {step.feedback.hints.map((h, i) => (
+                            <li key={i}>{h}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void loadReview(index + 1)}
+                      className="btn-secondary animate-pop-in"
                     >
                       {index + 1 < queue.length ? 'Next review' : 'Finish review'}
                     </button>

@@ -13,8 +13,8 @@ import { generatePuzzle, REVIEW_GEN_OPTS } from './generation'
 import type { GeneratedPuzzle } from './generation'
 import { getLesson } from '../content/registry'
 import { buildPracticeTemplate, conceptForLesson } from '../content/generated'
-import { lessonSuccessRate } from '../adaptivity/mastery'
-import { nextDifficultyDirection } from '../adaptivity/difficulty'
+import { difficultyForBox } from '../adaptivity/leitner'
+import type { Box } from '../adaptivity/leitner'
 
 // How many upcoming review puzzles to keep warming in the background so the
 // learner gets an instant puzzle on entry and on every "Next review".
@@ -23,27 +23,49 @@ const REVIEW_PREFETCH_DEPTH = 3
 // Each due lesson appears once in the queue, so a per-lesson cache is enough.
 const cache = new Map<string, Promise<GeneratedPuzzle | null>>()
 
-// Build the verified review puzzle for a lesson at the learner's current level,
+// Derive the difficulty direction from the learner's Leitner box for the skill.
+// difficultyForBox returns 3/4/5, matching TARGET_LEVELS (easier=3, same=4, harder=5).
+function directionForBox(box: Box): 'easier' | 'same' | 'harder' {
+  const level = difficultyForBox(box)
+  if (level <= 3) return 'easier'
+  if (level === 4) return 'same'
+  return 'harder'
+}
+
+// Build the verified review puzzle for a lesson at the box-appropriate difficulty,
 // using the small, fast review budget. Never throws — resolves to null when the
 // lesson has no generator concept or generation abstains.
+// Only invoked when aiGenerationOn() is true.
 function requestReviewPuzzle(
   lesson: Lesson,
-  state: LearnerState | null,
+  box: Box,
 ): Promise<GeneratedPuzzle | null> {
   if (conceptForLesson(lesson) === null) return Promise.resolve(null)
-  const rate = state ? lessonSuccessRate(state, lesson.skillIds) : null
-  const template = buildPracticeTemplate(lesson, { direction: nextDifficultyDirection(rate) })
+  const direction = directionForBox(box)
+  const template = buildPracticeTemplate(lesson, { direction })
   if (!template) return Promise.resolve(null)
   return generatePuzzle(template, REVIEW_GEN_OPTS).catch(() => null)
 }
 
-// Start (or reuse) a background generation for `lesson` and return its promise.
-// Idempotent per lesson, so calling it from both Home and the review loop shares
-// one in-flight request.
-export function warmReview(lesson: Lesson, state: LearnerState | null): Promise<GeneratedPuzzle | null> {
+// Start (or reuse) a background generation for `lesson` at `box` difficulty and
+// return its promise. Idempotent per lesson, so calling it from both Home and
+// the review loop shares one in-flight request.
+// Only call when aiGenerationOn() is true.
+export function warmReview(lesson: Lesson, state: LearnerState | null, box: Box = 1): Promise<GeneratedPuzzle | null> {
   const existing = cache.get(lesson.id)
   if (existing) return existing
-  const pending = requestReviewPuzzle(lesson, state)
+  // Derive box from state if not supplied explicitly.
+  const resolvedBox: Box = (() => {
+    if (box !== 1) return box
+    if (!state) return 1
+    // Find the first skill this lesson teaches and read its box.
+    for (const skillId of lesson.skillIds) {
+      const entry = state.review?.boxes?.[skillId]
+      if (entry) return entry.box
+    }
+    return 1
+  })()
+  const pending = requestReviewPuzzle(lesson, resolvedBox)
   cache.set(lesson.id, pending)
   return pending
 }
