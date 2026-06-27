@@ -182,7 +182,12 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
     const newIds = evaluateBadges(ctx)
     if (newIds.length === 0) return next
     setPendingBadges((prev) => [...prev, ...newIds.filter((id) => !prev.includes(id))])
-    return { ...next, badges: [...next.badges, ...newIds] }
+    const now = Date.now()
+    return {
+      ...next,
+      badges: [...next.badges, ...newIds],
+      badgeAcquiredAt: { ...next.badgeAcquiredAt, ...Object.fromEntries(newIds.map((id) => [id, now])) },
+    }
   }, [])
 
   const createLearner = useCallback(

@@ -426,6 +426,23 @@ describe('migrate', () => {
     migrate(legacy)
     expect(JSON.stringify(legacy)).toBe(before)
   })
+
+  it('backfills badgeAcquiredAt to {} when missing, preserving existing badges', () => {
+    const legacy = {
+      ...emptyLearnerState('l1'),
+      badges: ['some-badge'],
+    } as unknown as LearnerState
+    delete (legacy as Record<string, unknown>).badgeAcquiredAt
+    const next = migrate(legacy)
+    expect(next.badgeAcquiredAt).toEqual({})
+    expect(next.badges).toContain('some-badge')
+  })
+
+  it('does not overwrite existing badgeAcquiredAt entries', () => {
+    const state = { ...emptyLearnerState('l1'), badgeAcquiredAt: { 'my-badge': 12345 } }
+    const next = migrate(state)
+    expect(next.badgeAcquiredAt['my-badge']).toBe(12345)
+  })
 })
 
 describe('tickTimers', () => {
@@ -451,6 +468,44 @@ describe('tickTimers', () => {
     base.lessonProgress['lesson-x'].openedAt = null
     const next = tickTimers(base, 9999)
     expect(next.lessonProgress['lesson-x'].openedAt).toBeNull()
+  })
+})
+
+describe('badgeAcquiredAt — lesson award', () => {
+  const lessonWithAward: Lesson = {
+    ...lesson,
+    award: { id: 'test-badge', title: 'Test Badge', blurb: 'You did it!' },
+  }
+
+  it('stamps badgeAcquiredAt[award.id] with the same value as completedAt when completing a lesson', () => {
+    let state = completeConcept(start(), lessonWithAward, 'intro')
+    state = recordSequenceResult(state, lessonWithAward, 'q1', true, ['right'])
+    state = recordSequenceResult(state, lessonWithAward, 'q2', true, ['right'])
+    expect(state.badges).toContain('test-badge')
+    const completedAt = state.lessonProgress['lesson-x'].completedAt
+    expect(completedAt).not.toBeNull()
+    expect(state.badgeAcquiredAt['test-badge']).toBe(completedAt)
+  })
+
+  it('does not overwrite badgeAcquiredAt if the badge was already earned', () => {
+    let state = completeConcept(start(), lessonWithAward, 'intro')
+    state = recordSequenceResult(state, lessonWithAward, 'q1', true, ['right'])
+    state = recordSequenceResult(state, lessonWithAward, 'q2', true, ['right'])
+    const firstTs = state.badgeAcquiredAt['test-badge']
+    // Restart and complete again — badge already in state.badges so not re-stamped
+    state = restartLesson(state, lessonWithAward)
+    state = completeConcept(state, lessonWithAward, 'intro')
+    state = recordSequenceResult(state, lessonWithAward, 'q1', true, ['right'])
+    state = recordSequenceResult(state, lessonWithAward, 'q2', true, ['right'])
+    // completedLessonIds prevents re-push; badge already included, stamp unchanged
+    expect(state.badgeAcquiredAt['test-badge']).toBe(firstTs)
+  })
+
+  it('leaves badgeAcquiredAt untouched when lesson has no award', () => {
+    let state = completeConcept(start(), lesson, 'intro')
+    state = recordSequenceResult(state, lesson, 'q1', true, ['right'])
+    state = recordSequenceResult(state, lesson, 'q2', true, ['right'])
+    expect(state.badgeAcquiredAt).toEqual({})
   })
 })
 
