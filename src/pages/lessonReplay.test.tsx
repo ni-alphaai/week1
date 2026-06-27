@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { emptyLearnerState } from '../storage/types'
 import type { LearnerState } from '../storage/types'
@@ -83,7 +83,12 @@ vi.mock('../components/BadgeToast', () => ({ BadgeToast: () => null }))
 vi.mock('../components/Confetti', () => ({ Confetti: () => null }))
 vi.mock('../components/SoundToggle', () => ({ SoundToggle: () => null }))
 vi.mock('../components/MapGrid', () => ({ MapGrid: () => null }))
-vi.mock('../components/CommandSequence', () => ({ CommandSequence: () => null }))
+vi.mock('../components/CommandSequence', () => ({
+  // Expose program length so tests can assert editors are blank on replay.
+  CommandSequence: ({ program }: { program: unknown[] }) => (
+    <div data-testid="program-editor">{program.length}</div>
+  ),
+}))
 vi.mock('../components/BirdGuide', () => ({
   BirdGuide: ({ message }: { message: string }) => <div>{message}</div>,
 }))
@@ -115,7 +120,7 @@ beforeEach(() => {
 })
 
 describe('LessonPage replay', () => {
-  it('replay intent starts at step 0 (concept) with blank editors and keeps completion', async () => {
+  it('replay intent starts at step 0 (concept), not the reward screen', async () => {
     render(
       <MemoryRouter initialEntries={['/lesson/lesson-test?replay=1']}>
         <Routes>
@@ -132,5 +137,29 @@ describe('LessonPage replay', () => {
     expect(screen.queryByText('Lesson complete')).not.toBeInTheDocument()
     // The puzzle step is not shown either (we are on step 0 = concept).
     expect(screen.queryByText('Reach the treasure')).not.toBeInTheDocument()
+  })
+
+  it('replay play step has blank editors — savedPrograms are not hydrated', async () => {
+    render(
+      <MemoryRouter initialEntries={['/lesson/lesson-test?replay=1']}>
+        <Routes>
+          <Route path="/lesson/:lessonId" element={<LessonPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(holder.deliverState).toBeTypeOf('function')
+    act(() => holder.deliverState!(completedLessonState()))
+
+    // Advance past the concept to the play step.
+    const continueBtn = await screen.findByRole('button', { name: /continue/i })
+    fireEvent.click(continueBtn)
+
+    // The puzzle goal is now shown.
+    expect(await screen.findByText('Reach the treasure')).toBeInTheDocument()
+    // The program editor should be empty (savedPrograms not hydrated).
+    // completedLessonState sets savedPrograms.q1 = [{ kind:'move', ... }], but
+    // replay skips hydration so the editor should show 0 nodes.
+    expect(screen.getByTestId('program-editor').textContent).toBe('0')
   })
 })

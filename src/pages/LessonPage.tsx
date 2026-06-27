@@ -237,25 +237,33 @@ export function LessonPage() {
     setVariantLoading(false)
     setVariantNotice(null)
     stepStartRef.current = Date.now()
-    if (isReplay) {
-      // Replay: keep editors blank — do not hydrate savedPrograms and do not
-      // advance currentStep in lessonProgress (completedAt/status stay intact).
-      // Known limitation: per-step UI resets above (hints, lastAttempt, timers)
-      // are still applied; this is safe for Wave 2 where replay is session-only.
-      return
-    }
     if (lesson && currentStep && (currentStep.type === 'sequence' || currentStep.type === 'conditional')) {
-      const saved = stateRef.current?.lessonProgress[lesson.id]?.savedPrograms[currentStep.id]
-      const restored = restoreProgram(saved)
-      if (restored.length === 0 && currentStep.initialProgram) {
-        setProgram(
-          currentStep.initialProgram.map((inst) => instructionToNode(inst, !currentStep.editableInitial)),
-        )
+      if (isReplay) {
+        // Replay: skip savedPrograms hydration so editors start blank.
+        // Still seed authored initialProgram blocks (locked scaffolding must
+        // appear even on replay — the learner can't solve the step without them).
+        if (currentStep.initialProgram) {
+          setProgram(
+            currentStep.initialProgram.map((inst) => instructionToNode(inst, !currentStep.editableInitial)),
+          )
+        } else {
+          setProgram([])
+        }
       } else {
-        setProgram(restored)
+        const saved = stateRef.current?.lessonProgress[lesson.id]?.savedPrograms[currentStep.id]
+        const restored = restoreProgram(saved)
+        if (restored.length === 0 && currentStep.initialProgram) {
+          setProgram(
+            currentStep.initialProgram.map((inst) => instructionToNode(inst, !currentStep.editableInitial)),
+          )
+        } else {
+          setProgram(restored)
+        }
       }
     }
-    if (lesson && currentStep) {
+    if (!isReplay && lesson && currentStep) {
+      // Replay: do not advance currentStep in lessonProgress so completedAt /
+      // status / completedStepIds stay intact for the session.
       setCurrentStep(lesson.id, currentStep.id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
