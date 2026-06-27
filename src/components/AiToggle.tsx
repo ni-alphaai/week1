@@ -3,10 +3,10 @@ import { useAiEnabled } from '../lib/useAiEnabled'
 import { aiEnabled } from '../ai/config'
 
 export function AiToggle({ className = '' }: { className?: string }) {
-  if (!aiEnabled) return null
-
   useAiEnabled() // subscribes to preference changes so button re-renders
   const on = isAiOn()
+
+  if (!aiEnabled) return null
   return (
     <button
       type="button"
