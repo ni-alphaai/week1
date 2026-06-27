@@ -17,7 +17,7 @@ import { conceptForLesson, buildPracticeTemplate, toPracticeStep } from '../cont
 import { warmSmallerVariant, consumeSmallerVariant, clearSmallerVariant } from '../ai/variantPrefetch'
 import { encodePuzzle } from '../content/shareCode'
 import { nextDifficultyDirection } from '../adaptivity/difficulty'
-import { lessonSuccessRate } from '../adaptivity/mastery'
+import { belowSkilled, lessonSuccessRate } from '../adaptivity/mastery'
 import { MapGrid } from '../components/MapGrid'
 import { CommandSequence } from '../components/CommandSequence'
 import type { ProgramNode } from '../components/CommandSequence'
@@ -559,6 +559,7 @@ export function LessonPage() {
     const nextId = getNextLessonId(lesson.id)
     const streak = state?.streak.current ?? 0
     const earnedBadge = lesson.award && (state?.badges?.includes(lesson.award.id) ?? false)
+    const showSoftGate = state ? belowSkilled(state, lesson.id) : false
     return (
       <div className="animate-float-in mx-auto max-w-md px-4 py-10">
         <BadgeToast />
@@ -596,7 +597,7 @@ export function LessonPage() {
                 />
               </div>
               <h1 className="reward-title">Lesson complete</h1>
-              <p className="mt-1 text-muted">You finished “{lesson.title}”.</p>
+              <p className="mt-1 text-muted">You finished "{lesson.title}".</p>
             </>
           )}
           {streak > 0 && (
@@ -604,9 +605,25 @@ export function LessonPage() {
               <FlameIcon className="h-4 w-4" /> {streak}-day streak
             </div>
           )}
+          {showSoftGate && (
+            <div className="soft-gate-nudge mt-5 rounded-lg bg-[var(--color-surface-strong)] px-4 py-3 text-sm text-muted" data-testid="soft-gate-nudge">
+              <p className="font-medium text-[var(--color-text)]">Keep sharpening these skills</p>
+              <p className="mt-0.5">Review this lesson to reach the Skilled tier before moving on.</p>
+            </div>
+          )}
           <div className="mt-6 flex flex-col gap-2">
+            {showSoftGate && (
+              <Link to="/review" onClick={() => playSound('click')} className="btn-primary" data-testid="soft-gate-review-cta">
+                Review skills
+              </Link>
+            )}
             {nextId ? (
-              <Link to={`/lesson/${nextId}`} onClick={() => playSound('click')} className="btn-primary">
+              <Link
+                to={`/lesson/${nextId}`}
+                onClick={() => playSound('click')}
+                className={showSoftGate ? 'btn-ghost' : 'btn-primary'}
+                data-testid="next-lesson-link"
+              >
                 Next lesson
               </Link>
             ) : (

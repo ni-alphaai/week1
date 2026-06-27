@@ -3,6 +3,8 @@
 // deterministic arithmetic, so it works with AI off and needs no new storage.
 
 import type { LearnerState, SkillStat } from '../storage/types'
+import { masteryTier } from '../storage/progress'
+import { getLesson } from '../content/registry'
 import { isDue } from './leitner'
 import type { Box } from './leitner'
 
@@ -78,4 +80,16 @@ export function dueSkills(state: LearnerState, now = Date.now(), cap = DUE_CAP):
   // Soonest-due first: never-reviewed (lastReviewedAt=0) sorts before any real timestamp.
   due.sort((a, b) => a.lastReviewedAt - b.lastReviewedAt)
   return due.slice(0, cap).map((e) => e.skillId)
+}
+
+// True if any of the lesson's skills are below the Skilled mastery tier.
+// Used to decide whether to show the Soft Gate nudge on the lesson completion screen.
+// Returns false for unknown lesson ids (no skillIds to check).
+export function belowSkilled(state: LearnerState, lessonId: string): boolean {
+  const lesson = getLesson(lessonId)
+  if (!lesson || lesson.skillIds.length === 0) return false
+  return lesson.skillIds.some((id) => {
+    const tier = masteryTier(state.skillStats[id])
+    return tier === 'Novice' || tier === 'Apprentice'
+  })
 }

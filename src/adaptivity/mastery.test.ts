@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { emptyLearnerState } from '../storage/types'
 import type { SkillStat } from '../storage/types'
 import type { Box } from './leitner'
-import { decayedSuccessRate, dueSkills, lessonMastery, lessonSuccessRate } from './mastery'
+import { belowSkilled, decayedSuccessRate, dueSkills, lessonMastery, lessonSuccessRate } from './mastery'
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = 100 * DAY
@@ -143,5 +143,52 @@ describe('dueSkills (Leitner)', () => {
     const due = dueSkills(state, NOW)
     expect(due).toContain('met')
     expect(due).not.toContain('unmet')
+  })
+})
+
+// belowSkilled: lesson-1-sequencing-cargo has skillIds ['sequencing', 'planning']
+// Build a state with those skills at a given score and attempt count.
+function stateAt(scorePercent: number, attempts: number) {
+  const state = emptyLearnerState('l1')
+  // correct = ceil(scorePercent * attempts / 100) so the achieved rate is >= scorePercent
+  const correct = Math.ceil((scorePercent * attempts) / 100)
+  const skillStat: SkillStat = {
+    attempts,
+    correct,
+    struggles: 0,
+    source: 'lesson',
+    practiceAttempts: 0,
+    practiceCorrect: 0,
+    lastCorrectAt: null,
+  }
+  state.skillStats['sequencing'] = { ...skillStat }
+  state.skillStats['planning'] = { ...skillStat }
+  return state
+}
+
+describe('belowSkilled (Soft Gate predicate)', () => {
+  it('is true at 80%/2 attempts — below the >=3 floor for Skilled', () => {
+    expect(belowSkilled(stateAt(80, 2), 'lesson-1-sequencing-cargo')).toBe(true)
+  })
+
+  it('is false at 80%/3 attempts — exactly at Skilled', () => {
+    expect(belowSkilled(stateAt(80, 3), 'lesson-1-sequencing-cargo')).toBe(false)
+  })
+
+  it('is true at 60%/5 attempts — score too low for Skilled', () => {
+    expect(belowSkilled(stateAt(60, 5), 'lesson-1-sequencing-cargo')).toBe(true)
+  })
+
+  it('is true when a learner has no attempts yet', () => {
+    const state = emptyLearnerState('l1')
+    expect(belowSkilled(state, 'lesson-1-sequencing-cargo')).toBe(true)
+  })
+
+  it('is false when all skills are at Master tier', () => {
+    expect(belowSkilled(stateAt(90, 4), 'lesson-1-sequencing-cargo')).toBe(false)
+  })
+
+  it('is false for an unknown lesson id (no skillIds)', () => {
+    expect(belowSkilled(stateAt(80, 2), 'nonexistent-lesson')).toBe(false)
   })
 })

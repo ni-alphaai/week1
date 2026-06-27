@@ -258,7 +258,7 @@ export function masteryTier(stat: SkillStat | undefined): MasteryTier {
   if (!stat || stat.attempts < 2) return 'Novice'
   const score = masteryScore(stat)
   if (score >= 90 && stat.attempts >= 4) return 'Master'
-  if (score >= 80) return 'Skilled'
+  if (score >= 80 && stat.attempts >= 3) return 'Skilled'
   if (score >= 60) return 'Apprentice'
   return 'Novice'
 }

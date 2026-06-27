@@ -8,6 +8,7 @@ import {
   courseCompletionPercent,
   ensureLesson,
   masteryScore,
+  masteryTier,
   lessonHasProgress,
   migrate,
   nextRecommendedLessonId,
@@ -238,6 +239,35 @@ describe('selectors', () => {
     expect(resumeStepId(lesson, [])).toBe('intro')
     expect(resumeStepId(lesson, ['intro', 'q1'])).toBe('q2')
     expect(resumeStepId(lesson, ['intro', 'q1', 'q2'])).toBe('q2')
+  })
+
+  describe('masteryTier', () => {
+    function mkStat(attempts: number, correct: number): Parameters<typeof masteryTier>[0] {
+      return { attempts, correct, struggles: 0, source: 'lesson', practiceAttempts: 0, practiceCorrect: 0, lastCorrectAt: null }
+    }
+    it('returns Novice with no stat', () => {
+      expect(masteryTier(undefined)).toBe('Novice')
+    })
+    it('returns Novice below 2 attempts', () => {
+      expect(masteryTier(mkStat(1, 1))).toBe('Novice')
+    })
+    it('returns Apprentice at >=2 attempts but score >=80 — below the Skilled floor', () => {
+      // 80% over 2 attempts should NOT qualify as Skilled (floor is now >=3 attempts)
+      expect(masteryTier(mkStat(2, 2))).toBe('Apprentice')
+    })
+    it('returns Skilled at >=80% and exactly 3 attempts', () => {
+      expect(masteryTier(mkStat(3, 3))).toBe('Skilled')
+    })
+    it('returns Apprentice at >=2 attempts but score <80', () => {
+      expect(masteryTier(mkStat(3, 2))).toBe('Apprentice') // 66%
+    })
+    it('returns Master at >=90% and >=4 attempts', () => {
+      expect(masteryTier(mkStat(4, 4))).toBe('Master')
+    })
+    it('returns Skilled (not Master) at >=80% and 3 attempts even if score is 90', () => {
+      // 3 attempts is below the Master floor of 4
+      expect(masteryTier(mkStat(3, 3))).toBe('Skilled')
+    })
   })
 })
 

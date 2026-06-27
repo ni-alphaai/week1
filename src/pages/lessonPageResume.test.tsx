@@ -180,3 +180,48 @@ describe('LessonPage resume', () => {
     expect(screen.queryByText('Reach the treasure')).not.toBeInTheDocument()
   })
 })
+
+// Helper: a completed-lesson state where skill stats are set to a given score/attempts.
+function completedWithStats(attempts: number, correct: number): LearnerState {
+  const state = completedLessonState()
+  state.skillStats['sequencing'] = {
+    attempts,
+    correct,
+    struggles: 0,
+    source: 'lesson',
+    practiceAttempts: 0,
+    practiceCorrect: 0,
+    lastCorrectAt: null,
+  }
+  return state
+}
+
+describe('Soft Gate (lesson completion screen)', () => {
+  // Note: the registry mock has getNextLessonId returning null (final lesson),
+  // so we assert the "Review skills" CTA and nudge, not the next-lesson link.
+
+  it('shows the nudge and Review CTA when skill is below Skilled (80%/2 attempts)', async () => {
+    renderLesson()
+    act(() => holder.deliverState!(completedWithStats(2, 2))) // 100% but only 2 attempts < 3
+    await screen.findByText('Lesson complete')
+    expect(screen.getByTestId('soft-gate-nudge')).toBeInTheDocument()
+    expect(screen.getByTestId('soft-gate-review-cta')).toBeInTheDocument()
+    // The next-lesson affordance is gone (no next lesson in mock) but completion text shows
+    expect(screen.getByText('You completed every lesson. Amazing!')).toBeInTheDocument()
+  })
+
+  it('does not show the nudge when skill has reached Skilled (>=80%, >=3 attempts)', async () => {
+    renderLesson()
+    act(() => holder.deliverState!(completedWithStats(3, 3))) // 100%/3 attempts = Skilled
+    await screen.findByText('Lesson complete')
+    expect(screen.queryByTestId('soft-gate-nudge')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('soft-gate-review-cta')).not.toBeInTheDocument()
+  })
+
+  it('shows nudge with no skill attempts yet (freshly completed lesson)', async () => {
+    renderLesson()
+    act(() => holder.deliverState!(completedLessonState())) // no skillStats
+    await screen.findByText('Lesson complete')
+    expect(screen.getByTestId('soft-gate-nudge')).toBeInTheDocument()
+  })
+})
