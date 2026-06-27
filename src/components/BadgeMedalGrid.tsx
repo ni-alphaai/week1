@@ -19,6 +19,10 @@ export interface BadgeMedalGridProps {
   items: BadgeMedalGridItem[]
   onSelect: (badgeId: string) => void
   className?: string
+  /** When false, tiles render as divs with no click handler (for detail-card medal slot). Default: true. */
+  interactive?: boolean
+  /** When false, the badge title label is omitted (for the compact solo medal in the detail card). Default: true. */
+  showLabels?: boolean
 }
 
 /**
@@ -31,7 +35,7 @@ export interface BadgeMedalGridProps {
  * 3D medal per earned tile using viewport+scissor — never a context per tile.
  * The decorative canvas is aria-hidden; all real info stays in the DOM.
  */
-export function BadgeMedalGrid({ items, onSelect, className }: BadgeMedalGridProps) {
+export function BadgeMedalGrid({ items, onSelect, className, interactive = true, showLabels = true }: BadgeMedalGridProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   // Per-tile elements, keyed by badgeId, handed to the scene for viewport/scissor.
@@ -92,6 +96,38 @@ export function BadgeMedalGrid({ items, onSelect, className }: BadgeMedalGridPro
       />
       {items.map((item) => {
         const meta = badgeMeta(item.badgeId)
+        const tileClass = [
+          'badge-tile',
+          `badge-tier--${item.tier}`,
+          item.earned ? 'badge-tile--earned' : 'badge-tile--locked',
+        ].join(' ')
+        const tileContent = (
+          <>
+            <span className="badge-tile__medal">
+              {item.earned ? (
+                <span className="badge-tile__emblem">{emblemFor(item.badgeId, 'h-7 w-7')}</span>
+              ) : (
+                <LockIcon className="h-6 w-6" />
+              )}
+            </span>
+            {showLabels && <span className="badge-tile__label">{meta.title}</span>}
+          </>
+        )
+        if (!interactive) {
+          return (
+            <div
+              key={item.badgeId}
+              ref={(el) => {
+                if (el) tileRefs.current.set(item.badgeId, el)
+                else tileRefs.current.delete(item.badgeId)
+              }}
+              className={tileClass}
+              title={meta.blurb || undefined}
+            >
+              {tileContent}
+            </div>
+          )
+        }
         return (
           <button
             key={item.badgeId}
@@ -101,21 +137,10 @@ export function BadgeMedalGrid({ items, onSelect, className }: BadgeMedalGridPro
               else tileRefs.current.delete(item.badgeId)
             }}
             onClick={() => onSelect(item.badgeId)}
-            className={[
-              'badge-tile',
-              `badge-tier--${item.tier}`,
-              item.earned ? 'badge-tile--earned' : 'badge-tile--locked',
-            ].join(' ')}
+            className={tileClass}
             title={meta.blurb || undefined}
           >
-            <span className="badge-tile__medal">
-              {item.earned ? (
-                <span className="badge-tile__emblem">{emblemFor(item.badgeId, 'h-7 w-7')}</span>
-              ) : (
-                <LockIcon className="h-6 w-6" />
-              )}
-            </span>
-            <span className="badge-tile__label">{meta.title}</span>
+            {tileContent}
           </button>
         )
       })}

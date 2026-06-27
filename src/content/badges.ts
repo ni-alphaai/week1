@@ -134,6 +134,23 @@ export function badgeMeta(id: string): BadgeMeta {
   return { title: id, blurb: '', rarity: 'common', tier: 'bronze' }
 }
 
+/**
+ * Canonical ordered list of all badge ids: achievement badges first (BADGES
+ * order), then lesson-award badge ids (stable, deduplicated). This is the
+ * single source of truth for "total badges" used by the HomeDashboard grid.
+ */
+export function listAllBadgeIds(): string[] {
+  const ids: string[] = BADGES.map((b) => b.id)
+  const seen = new Set(ids)
+  for (const lesson of listLessons()) {
+    if (lesson.award && !seen.has(lesson.award.id)) {
+      ids.push(lesson.award.id)
+      seen.add(lesson.award.id)
+    }
+  }
+  return ids
+}
+
 // Returns badge ids that SHOULD be awarded and are not already in state.badges.
 export function evaluateBadges(ctx: AwardCtx): string[] {
   return BADGES.filter((b) => b.awardOn(ctx) && !ctx.state.badges.includes(b.id)).map((b) => b.id)

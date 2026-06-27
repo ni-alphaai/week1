@@ -96,4 +96,14 @@ describe('BadgeMedalGrid (DOM-first)', () => {
     render(<BadgeMedalGrid items={[]} onSelect={() => {}} />)
     expect(screen.queryAllByRole('button')).toHaveLength(0)
   })
+
+  it('interactive={false} renders no buttons (tiles are divs)', () => {
+    render(<BadgeMedalGrid items={items} onSelect={() => {}} interactive={false} />)
+    expect(screen.queryAllByRole('button')).toHaveLength(0)
+  })
+
+  it('showLabels={false} omits the title text', () => {
+    render(<BadgeMedalGrid items={[items[0]]} onSelect={() => {}} showLabels={false} />)
+    expect(screen.queryByText(badgeMeta(items[0].badgeId).title)).not.toBeInTheDocument()
+  })
 })
