@@ -3,6 +3,7 @@ import type { LearnerState, SkillStat, StepStat } from './types'
 import { conceptForLesson } from '../content/generated'
 import { listLessons } from '../content/registry'
 import { dueSkills } from '../adaptivity/mastery'
+import { promote, reset } from '../adaptivity/leitner'
 
 // Per-session cap on time-on-task accumulated from a single openedAt stamp, so
 // a tab left open overnight can't inflate a step's timeSpentMs unbounded.
@@ -290,7 +291,10 @@ export function migrate(state: LearnerState): LearnerState {
     if (p.openedAt === undefined) p.openedAt = null
   }
   if (!next.review) {
-    next.review = { lastReviewedAt: {}, lastDueDate: null, dueQueue: [] }
+    next.review = { lastReviewedAt: {}, lastDueDate: null, dueQueue: [], boxes: {} }
+  }
+  if (!next.review.boxes) {
+    next.review.boxes = {}
   }
   if (!next.aiUsage) {
     next.aiUsage = {
@@ -358,7 +362,7 @@ export function recordPracticeResult(
 }
 
 // A spaced-review attempt: same stats as practice, plus a last-reviewed stamp
-// on the skill so the due queue can defer it.
+// on the skill so the due queue can defer it, and a Leitner box move.
 export function recordReview(
   state: LearnerState,
   lesson: Lesson,
@@ -368,8 +372,13 @@ export function recordReview(
   now = Date.now(),
 ): LearnerState {
   const next = recordPracticeResult(state, lesson, stepId, correct, now)
-  next.review = next.review ?? { lastReviewedAt: {}, lastDueDate: null, dueQueue: [] }
+  next.review = next.review ?? { lastReviewedAt: {}, lastDueDate: null, dueQueue: [], boxes: {} }
   next.review.lastReviewedAt = { ...next.review.lastReviewedAt, [skillId]: now }
+  const prevBox = next.review.boxes[skillId]?.box ?? 1
+  next.review.boxes = {
+    ...next.review.boxes,
+    [skillId]: { box: correct ? promote(prevBox) : reset(), lastReviewedAt: now },
+  }
   return next
 }
 
@@ -397,7 +406,7 @@ export function refreshDueQueue(state: LearnerState, now = Date.now()): LearnerS
   const today = localDateString(new Date(now))
   if (state.review?.lastDueDate === today) return state
   const next = clone(state)
-  next.review = next.review ?? { lastReviewedAt: {}, lastDueDate: null, dueQueue: [] }
+  next.review = next.review ?? { lastReviewedAt: {}, lastDueDate: null, dueQueue: [], boxes: {} }
   const skills = dueSkills(next, now)
   const lessons = listLessons()
   const queue: string[] = []

@@ -1,4 +1,5 @@
 import type { Step } from '../types'
+import type { Box } from '../adaptivity/leitner'
 
 export interface LearnerProfile {
   id: string
@@ -50,6 +51,8 @@ export interface ReviewState {
   lastDueDate: string | null
   /** lesson ids due for review. */
   dueQueue: string[]
+  /** Per-skill Leitner box tracking. */
+  boxes: Record<string, { box: Box; lastReviewedAt: number }>
 }
 
 export interface AiUsage {
@@ -100,7 +103,7 @@ export function emptyLearnerState(learnerId: string): LearnerState {
     streak: { current: 0, longest: 0, lastCompletedDate: null },
     portfolio: [],
     badges: [],
-    review: { lastReviewedAt: {}, lastDueDate: null, dueQueue: [] },
+    review: { lastReviewedAt: {}, lastDueDate: null, dueQueue: [], boxes: {} },
     aiUsage: {
       explainRequested: 0,
       explainServed: 0,

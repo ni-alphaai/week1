@@ -311,6 +311,39 @@ describe('recordReview', () => {
   })
 })
 
+const NOW = 1_000_000_000_000
+
+describe('recordReview box movement', () => {
+  it('correct promotes the targeted skill box and stamps lastReviewedAt', () => {
+    const s1 = recordReview(start(), lesson, 'sequencing', 'q1', true, NOW)
+    const entry = s1.review.boxes['sequencing']
+    expect(entry.box).toBe(2) // starts at box 1, promoted to 2
+    expect(entry.lastReviewedAt).toBe(NOW)
+  })
+
+  it('wrong resets the targeted skill to box 1', () => {
+    let state = start()
+    state = recordReview(state, lesson, 'sequencing', 'q1', true, NOW)  // box 2
+    state = recordReview(state, lesson, 'sequencing', 'q1', true, NOW)  // box 3
+    state = recordReview(state, lesson, 'sequencing', 'q1', false, NOW) // wrong -> box 1
+    expect(state.review.boxes['sequencing'].box).toBe(1)
+  })
+
+  it('only the targeted skill box moves, others are unaffected', () => {
+    const next = recordReview(start(), lesson, 'sequencing', 'q1', true, NOW)
+    expect(next.review.boxes['conditionals']).toBeUndefined()
+  })
+
+  it('correct review counts as an attempt in mastery stats', () => {
+    let state = start()
+    state = recordReview(state, lesson, 'sequencing', 'q1', true, NOW)
+    state = recordReview(state, lesson, 'sequencing', 'q1', true, NOW)
+    state = recordReview(state, lesson, 'sequencing', 'q1', true, NOW)
+    expect(state.skillStats['sequencing'].attempts).toBe(3)
+    expect(state.skillStats['sequencing'].correct).toBe(3)
+  })
+})
+
 describe('migrate', () => {
   it('fills missing fields on an old state and is idempotent', () => {
     const legacy = {
@@ -344,7 +377,7 @@ describe('migrate', () => {
     expect(next.stepStats['q1'].source).toBe('lesson')
     expect(next.stepStats['q1'].timeSpentMs).toBe(0)
     expect(next.lessonProgress['lesson-x'].openedAt).toBeNull()
-    expect(next.review).toEqual({ lastReviewedAt: {}, lastDueDate: null, dueQueue: [] })
+    expect(next.review).toEqual({ lastReviewedAt: {}, lastDueDate: null, dueQueue: [], boxes: {} })
     expect(next.aiUsage).toEqual({
       explainRequested: 0,
       explainServed: 0,
