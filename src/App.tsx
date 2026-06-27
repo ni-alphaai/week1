@@ -29,6 +29,7 @@ function AppRoutes() {
         <Route path="/lesson/:lessonId" element={<LessonPage />} />
         <Route path="/practice/:lessonId" element={<PracticePage />} />
         <Route path="/review" element={<ReviewPage />} />
+        <Route path="/review/lesson/:lessonId" element={<ReviewPage />} />
         {/* Public shared puzzle: reachable without an active learner. It renders
             under LearnerProvider but never reads or records learner state. */}
         <Route path="/share/:code" element={<SharePage />} />

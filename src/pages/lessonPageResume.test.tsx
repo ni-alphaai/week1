@@ -204,7 +204,10 @@ describe('Soft Gate (lesson completion screen)', () => {
     act(() => holder.deliverState!(completedWithStats(2, 2))) // 100% but only 2 attempts < 3
     await screen.findByText('Lesson complete')
     expect(screen.getByTestId('soft-gate-nudge')).toBeInTheDocument()
-    expect(screen.getByTestId('soft-gate-review-cta')).toBeInTheDocument()
+    const cta = screen.getByTestId('soft-gate-review-cta')
+    expect(cta).toBeInTheDocument()
+    // CTA must point to the lesson-scoped review route, not the daily /review.
+    expect(cta).toHaveAttribute('href', '/review/lesson/lesson-test')
   })
 
   it('does not show the nudge when skill has reached Skilled (>=80%, >=3 attempts)', async () => {

@@ -269,6 +269,16 @@ function renderReview() {
   )
 }
 
+function renderLessonReview(lessonId: string) {
+  return render(
+    <MemoryRouter initialEntries={[`/review/lesson/${lessonId}`]}>
+      <Routes>
+        <Route path="/review/lesson/:lessonId" element={<ReviewPage />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
 // Seed a learner state with one due skill ('loops') at box 3.
 function seededState(): LearnerState {
   const state = emptyLearnerState('kid-1')
@@ -374,5 +384,136 @@ describe('ReviewPage (AI off)', () => {
     await waitFor(() => {
       expect(holder.lastState?.review?.boxes?.['loops']?.box).toBe(1)
     })
+  })
+})
+
+// Seed a state where only 'loops' is below Skilled (Apprentice tier: 2 attempts, 1 correct = 50%).
+// 'sequencing' is at Skilled so it doesn't appear in the weak-skills list.
+// 'lesson-2-for-loops' has skillIds: ['loops', 'sequencing'].
+// lessonReviewQueue will return ['loops','loops','loops'] (3 repeats, 1 skill).
+function belowSkilledState(): LearnerState {
+  const state = emptyLearnerState('kid-1')
+  state.skillStats['loops'] = {
+    attempts: 2,
+    correct: 1,
+    struggles: 0,
+    source: 'lesson',
+    practiceAttempts: 0,
+    practiceCorrect: 0,
+    lastCorrectAt: Date.now() - 10_000,
+  }
+  state.review.boxes['loops'] = { box: 2, lastReviewedAt: 0 }
+  // sequencing is Skilled so belowSkilledSkills excludes it.
+  state.skillStats['sequencing'] = {
+    attempts: 3,
+    correct: 3,
+    struggles: 0,
+    source: 'lesson',
+    practiceAttempts: 0,
+    practiceCorrect: 0,
+    lastCorrectAt: Date.now() - 10_000,
+  }
+  return state
+}
+
+// Seed a state where ALL lesson skills are at Skilled (≥80%, ≥3 attempts).
+// lesson-2-for-loops has skillIds: ['loops', 'sequencing'], so both must be Skilled.
+function skilledState(): LearnerState {
+  const state = emptyLearnerState('kid-1')
+  const stat = {
+    attempts: 3,
+    correct: 3,
+    struggles: 0,
+    source: 'lesson' as const,
+    practiceAttempts: 0,
+    practiceCorrect: 0,
+    lastCorrectAt: Date.now() - 10_000,
+  }
+  state.skillStats['loops'] = stat
+  state.skillStats['sequencing'] = stat
+  return state
+}
+
+describe('ReviewPage lesson-scoped (AI off)', () => {
+  it('starts a review session (not "Nothing to review") when a below-Skilled skill exists', async () => {
+    renderLessonReview('lesson-2-for-loops')
+    act(() => holder.deliverState!(belowSkilledState()))
+
+    // The review puzzle should be shown, NOT the empty-queue message.
+    expect(await screen.findByText('Use a loop to reach the treasure!')).toBeInTheDocument()
+    expect(screen.queryByText(/All sharp/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Nothing to review/i)).not.toBeInTheDocument()
+  })
+
+  it('shows "All sharp" empty-queue message when all skills are already at Skilled tier', async () => {
+    renderLessonReview('lesson-2-for-loops')
+    act(() => holder.deliverState!(skilledState()))
+
+    expect(await screen.findByText(/All sharp/i)).toBeInTheDocument()
+    expect(screen.queryByText('Use a loop to reach the treasure!')).not.toBeInTheDocument()
+  })
+
+  it('shows "Lesson review" badge (not "Daily review") in the header', async () => {
+    renderLessonReview('lesson-2-for-loops')
+    act(() => holder.deliverState!(belowSkilledState()))
+
+    await screen.findByText('Use a loop to reach the treasure!')
+    expect(screen.getByText('Lesson review')).toBeInTheDocument()
+    expect(screen.queryByText('Daily review')).not.toBeInTheDocument()
+  })
+
+  it('shows tier-based recap (not box deltas) after completing the lesson-scoped session', async () => {
+    renderLessonReview('lesson-2-for-loops')
+    act(() => holder.deliverState!(belowSkilledState()))
+
+    // Wait for puzzle.
+    expect(await screen.findByText('Use a loop to reach the treasure!')).toBeInTheDocument()
+
+    // Trigger a failed run (outcome = 'failed').
+    await act(async () => {
+      holder.triggerSettle!({
+        solved: false,
+        run: { steps: [], status: 'stuck' } as any,
+        feedback: { status: 'incorrect', message: 'That path was wrong.' },
+      })
+    })
+
+    // The queue is 3 repeats of 'loops'; click "Next review" twice to exhaust.
+    // After the first item, click Next review to advance.
+    let nextBtn = await screen.findByRole('button', { name: /Next review|Finish review/i })
+    await act(async () => { nextBtn.click() })
+
+    // Second item: trigger settle + advance.
+    await screen.findByText('Use a loop to reach the treasure!')
+    await act(async () => {
+      holder.triggerSettle!({
+        solved: false,
+        run: { steps: [], status: 'stuck' } as any,
+        feedback: { status: 'incorrect', message: 'That path was wrong.' },
+      })
+    })
+    nextBtn = await screen.findByRole('button', { name: /Next review|Finish review/i })
+    await act(async () => { nextBtn.click() })
+
+    // Third (last) item: trigger settle then Finish review.
+    await screen.findByText('Use a loop to reach the treasure!')
+    await act(async () => {
+      holder.triggerSettle!({
+        solved: false,
+        run: { steps: [], status: 'stuck' } as any,
+        feedback: { status: 'incorrect', message: 'That path was wrong.' },
+      })
+    })
+    const finishBtn = await screen.findByRole('button', { name: /Finish review/i })
+    await act(async () => { finishBtn.click() })
+
+    // Recap must be visible with tier-based text (not "Box X→Y").
+    await screen.findByTestId('mastery-recap')
+    // Tier text: 'Keep practicing' since 'loops' is Apprentice and stays that way.
+    expect(screen.getByText(/Keep practicing/i)).toBeInTheDocument()
+    // Should NOT show box delta format.
+    expect(screen.queryByText(/Box \d+→\d+/)).not.toBeInTheDocument()
+    // Title should be "Review complete" not "All caught up!"
+    expect(screen.getByText('Review complete')).toBeInTheDocument()
   })
 })

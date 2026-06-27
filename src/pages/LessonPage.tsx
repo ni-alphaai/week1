@@ -618,7 +618,7 @@ export function LessonPage() {
           )}
           <div className="mt-6 flex flex-col gap-2">
             {showSoftGate && (
-              <Link to="/review" onClick={() => playSound('click')} className="btn-primary" data-testid="soft-gate-review-cta">
+              <Link to={`/review/lesson/${lesson.id}`} onClick={() => playSound('click')} className="btn-primary" data-testid="soft-gate-review-cta">
                 Review skills
               </Link>
             )}
