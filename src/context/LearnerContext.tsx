@@ -19,6 +19,8 @@ interface LearnerContextValue {
   activeLearner: LearnerProfile | null
   state: LearnerState | null
   pendingBadges: string[]
+  saving: boolean
+  saveError: string | null
   createLearner: (name: string) => void
   deleteLearner: (id: string) => void
   selectLearner: (id: string) => void
@@ -67,11 +69,24 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
   const [activeId, setActiveId] = useState<string | null>(null)
   const [learnerState, setLearnerState] = useState<LearnerState | null>(null)
   const [pendingBadges, setPendingBadges] = useState<string[]>([])
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const stateRef = useRef<LearnerState | null>(null)
+  const pendingSaveRef = useRef<LearnerState | null>(null)
+  const savingRef = useRef(false)
+  const ownerVersionRef = useRef(0)
 
   useEffect(() => {
     stateRef.current = learnerState
   }, [learnerState])
+
+  useEffect(() => {
+    ownerVersionRef.current += 1
+    pendingSaveRef.current = null
+    savingRef.current = false
+    setSaving(false)
+    setSaveError(null)
+  }, [ownerKey])
 
   const installState = useCallback((loaded: LearnerState) => {
     const migrated = progress.migrate(loaded)
@@ -106,16 +121,51 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
     }
   }, [ownerKey, installState])
 
+  const drainSaveQueue = useCallback(() => {
+    if (savingRef.current) return
+    const next = pendingSaveRef.current
+    if (!next) return
+    pendingSaveRef.current = null
+    savingRef.current = true
+    setSaving(true)
+    const ownerVersion = ownerVersionRef.current
+    void backend.saveState(ownerKey, next)
+      .catch((error) => {
+        if (ownerVersion !== ownerVersionRef.current) return
+        console.error('Failed to save progress', error)
+        setSaveError('Progress could not be saved yet. Check your connection, then keep this tab open.')
+      })
+      .finally(() => {
+        if (ownerVersion !== ownerVersionRef.current) return
+        savingRef.current = false
+        if (pendingSaveRef.current) {
+          drainSaveQueue()
+        } else {
+          setSaving(false)
+        }
+      })
+  }, [ownerKey])
+
+  const queueStateSave = useCallback(
+    (next: LearnerState) => {
+      pendingSaveRef.current = next
+      setSaveError(null)
+      drainSaveQueue()
+    },
+    [drainSaveQueue],
+  )
+
   const persist = useCallback(
     (next: LearnerState) => {
-      // Optimistic: update UI immediately, then write asynchronously (best-effort).
+      // Optimistic: update UI immediately, then persist in order. Mobile browsers
+      // can resolve whole-state Firestore writes out of order; coalescing while a
+      // save is in flight guarantees the final remote write is the latest state
+      // (e.g. completed lesson beats older saved-program/current-step writes).
       stateRef.current = next
       setLearnerState(next)
-      void backend.saveState(ownerKey, next).catch((error) => {
-        console.error('Failed to save progress', error)
-      })
+      queueStateSave(next)
     },
-    [ownerKey],
+    [queueStateSave],
   )
 
   const mutate = useCallback(
@@ -196,11 +246,11 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       const merged = { ...current, aiUsage: mergeAiUsage(current.aiUsage, snap) }
       stateRef.current = merged
       setLearnerState(merged)
-      await backend.saveState(ownerKey, merged)
+      queueStateSave(merged)
     } catch {
       /* telemetry is best-effort */
     }
-  }, [ownerKey])
+  }, [queueStateSave])
 
   const signOut = useCallback(() => {
     // Close out running timers and fold in any pending telemetry before we
@@ -208,14 +258,14 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
     const current = stateRef.current
     if (current) {
       const ticked = progress.tickTimers(current)
-      void backend.saveState(ownerKey, ticked)
+      queueStateSave(ticked)
       void (async () => {
         try {
           const mod = await import('../ai/telemetry')
           const snap = (mod as any).snapshotAndReset?.() as Partial<AiUsage> | undefined
           if (snap) {
             const merged = { ...ticked, aiUsage: mergeAiUsage(ticked.aiUsage, snap) }
-            await backend.saveState(ownerKey, merged)
+            queueStateSave(merged)
           }
         } catch {
           /* best-effort */
@@ -227,7 +277,7 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
     stateRef.current = null
     setLearnerState(null)
     setPendingBadges([])
-  }, [ownerKey])
+  }, [ownerKey, queueStateSave])
 
   const ensureLesson = useCallback(
     (lesson: Lesson) => mutate((current) => progress.ensureLesson(current, lesson)),
@@ -322,12 +372,21 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
     [mutate],
   )
 
+  const flushLatestProgress = useCallback(() => {
+    const current = stateRef.current
+    if (!current) return
+    const ticked = progress.tickTimers(current)
+    stateRef.current = ticked
+    setLearnerState(ticked)
+    queueStateSave(ticked)
+  }, [queueStateSave])
+
   // Fold AI telemetry deltas into persisted state on a cadence, and flush
   // running step timers when the page is hidden or unloaded.
   useEffect(() => {
     const flush = () => {
       void flushTelemetry()
-      mutate((current) => progress.tickTimers(current))
+      flushLatestProgress()
     }
     const interval = setInterval(() => void flushTelemetry(), 5000)
     const onHide = () => flush()
@@ -338,7 +397,7 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       window.removeEventListener('pagehide', onHide)
       document.removeEventListener('visibilitychange', onHide)
     }
-  }, [flushTelemetry, mutate])
+  }, [flushTelemetry, flushLatestProgress])
 
   const activeLearner = useMemo(
     () => learners.find((profile) => profile.id === activeId) ?? null,
@@ -352,6 +411,8 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       activeLearner,
       state: learnerState,
       pendingBadges,
+      saving,
+      saveError,
       createLearner,
       deleteLearner,
       selectLearner,
@@ -375,6 +436,8 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       activeLearner,
       learnerState,
       pendingBadges,
+      saving,
+      saveError,
       createLearner,
       deleteLearner,
       selectLearner,

@@ -5,7 +5,8 @@ import { useAuth } from '../context/AuthContext'
 import { course, getLesson, listLessons } from '../content/registry'
 import { courseCompletionPercent, nextRecommendedLessonId } from '../storage/progress'
 import { BADGES, BADGE_LABELS } from '../content/badges'
-import { aiGenerationEnabled } from '../ai/config'
+import { aiGenerationOn } from '../ai/config'
+import { useAiEnabled } from '../lib/useAiEnabled'
 import { warmReviewAhead } from '../ai/reviewPrefetch'
 import {
   FlameIcon,
@@ -218,7 +219,7 @@ function HomeDashboard() {
   // review card is in view, so opening Daily Review feels instant. warmReview is
   // idempotent per lesson, so re-runs on state changes are cheap no-ops.
   useEffect(() => {
-    if (!aiGenerationEnabled || dueCount === 0) return
+    if (!aiGenerationOn() || dueCount === 0) return
     warmReviewAhead(state?.review?.dueQueue ?? [], 0, state)
   }, [state, dueCount])
   const lessons = listLessons()
@@ -386,6 +387,7 @@ function HomeDashboard() {
 }
 
 export function HomePage() {
+  useAiEnabled() // re-renders on AI Preference change
   const { ready, activeLearner } = useLearner()
   if (!ready) {
     return <div className="flex min-h-full items-center justify-center text-muted">Loading…</div>

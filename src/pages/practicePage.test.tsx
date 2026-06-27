@@ -58,7 +58,7 @@ const holder = vi.hoisted(() => {
 // generation on for the practice player.
 vi.mock('../ai/config', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../ai/config')>()
-  return { ...actual, aiGenerationEnabled: true }
+  return { ...actual, aiGenerationEnabled: true, aiGenerationOn: () => true }
 })
 vi.mock('../ai/generation', () => ({ generatePuzzle: vi.fn(async () => ({ aiGenerated: true, difficulty: 4 })) }))
 vi.mock('../ai/explain', () => ({ getExplanation: vi.fn(async () => ({ text: 'hint', source: 'authored' })) }))

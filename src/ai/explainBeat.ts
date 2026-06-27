@@ -3,7 +3,7 @@
 // AI explain is on, Gemini phrases it kid-friendly with the same facts.
 
 import type { BeatAction, BeatStep } from '../types'
-import { aiExplainEnabled } from './config'
+import { aiExplainOn } from './config'
 import { generateText } from './aiClient'
 
 export interface BeatExplainResult {
@@ -35,7 +35,7 @@ export async function explainBeatMistake(
   got: BeatAction | undefined,
 ): Promise<BeatExplainResult> {
   const base = diagnostic(step, beat, got)
-  if (!aiExplainEnabled) return { text: base, source: 'diagnostic' }
+  if (!aiExplainOn()) return { text: base, source: 'diagnostic' }
 
   const prompt = [
     `Beat number: ${beat}`,

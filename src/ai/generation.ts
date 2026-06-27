@@ -27,7 +27,7 @@ import type {
   Task,
   Teleport,
 } from '../types'
-import { OPENAI_MODEL, OPENAI_STRONG_MODEL, aiGenerationEnabled } from './config'
+import { OPENAI_MODEL, OPENAI_STRONG_MODEL, aiGenerationOn } from './config'
 import { generateText } from './aiClient'
 import { recordGen } from './telemetry'
 import { validatePuzzle, validateConceptPuzzle } from '../engine/verify'
@@ -1174,7 +1174,7 @@ export async function generatePuzzle(
   template: PuzzleTemplate,
   opts?: GenerateOptions,
 ): Promise<GeneratedPuzzle | null> {
-  if (!aiGenerationEnabled) return null
+  if (!aiGenerationOn()) return null
   recordGen('requested')
   // Graceful degradation: aim for the requested level first, then fall back to
   // level 3 (the easiest verifiable target) before abstaining to authored

@@ -7,6 +7,12 @@ import { runInstructions } from '../engine/map'
 vi.mock('./config', () => ({
   aiEnabled: false,
   aiExplainEnabled: false,
+  aiGenerationEnabled: false,
+  aiAdaptiveEnabled: false,
+  aiExplainOn: () => false,
+  aiGenerationOn: () => false,
+  aiAdaptiveOn: () => false,
+  aiAnyOn: () => false,
   AI_MODEL: 'test',
   recaptchaSiteKey: undefined,
 }))

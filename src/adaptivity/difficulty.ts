@@ -3,7 +3,7 @@
 // serving is gated by the adaptive flag, so with AI off the lesson order and
 // difficulty are unchanged (every decision is "same").
 
-import { aiAdaptiveEnabled } from '../ai/config'
+import { aiAdaptiveOn } from '../ai/config'
 import type { DifficultyBand } from '../engine/verify'
 
 // Target success band. Above -> make it harder; below -> make it easier.
@@ -47,7 +47,7 @@ export function recommendDirection(successRate: number | null): DifficultyDirect
 // Flag-gated entry point used by the app. With adaptive off, always "same" so
 // the MVP's fixed progression is preserved.
 export function nextDifficultyDirection(successRate: number | null): DifficultyDirection {
-  if (!aiAdaptiveEnabled) return 'same'
+  if (!aiAdaptiveOn()) return 'same'
   return recommendDirection(successRate)
 }
 

@@ -10,7 +10,8 @@ import { BirdGuide, type BirdMood } from './BirdGuide'
 import { LightbulbIcon, CompassIcon } from './icons'
 import { pickHint } from '../lib/hints'
 import { playSound } from '../lib/sound'
-import { aiExplainEnabled } from '../ai/config'
+import { aiExplainOn } from '../ai/config'
+import { useAiEnabled } from '../lib/useAiEnabled'
 import { explainBeatMistake } from '../ai/explainBeat'
 
 const STEP_MS = 260
@@ -110,6 +111,7 @@ export function BeatPuzzle({
   priorFailCount,
   isLastStep,
 }: BeatPuzzleProps) {
+  useAiEnabled() // re-renders on AI Preference change
   const [program, setProgram] = useState<ProgramNode[]>([])
   const [playedActions, setPlayedActions] = useState<(BeatAction | undefined)[]>([])
   const [activeBeat, setActiveBeat] = useState<number | null>(null)
@@ -297,7 +299,7 @@ export function BeatPuzzle({
               </span>
             )}
           </button>
-          {aiExplainEnabled && feedback === 'incorrect' && check?.firstWrongBeat != null && (
+          {aiExplainOn() && feedback === 'incorrect' && check?.firstWrongBeat != null && (
             <button
               type="button"
               onClick={handleExplain}

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { Command, Lesson, Position, SequenceStep } from '../types'
+import type { Lesson, MapConfig, SequenceStep } from '../types'
 import { useLearner } from '../context/LearnerContext'
 import { getLesson, registerGeneratedPuzzle } from '../content/registry'
 import { checkProgram } from '../engine/checker'
-import { carryFrames } from '../engine/map'
 import { MapGrid } from '../components/MapGrid'
 import { CommandSequence } from '../components/CommandSequence'
-import type { PaletteItem, ProgramNode } from '../components/CommandSequence'
+import type { ProgramNode } from '../components/CommandSequence'
+import { buildPalette } from '../components/buildPalette'
+import { RunStrip } from '../components/RunStrip'
+import { ObjectivesChips } from '../components/ObjectivesChips'
+import { usePuzzleRun } from '../run/usePuzzleRun'
 import { nodeToInstruction, instructionToNode, iterationMap } from '../components/programNodes'
 import { BirdGuide, type BirdMood } from '../components/BirdGuide'
 import { BadgeToast } from '../components/BadgeToast'
@@ -15,47 +18,15 @@ import { Confetti } from '../components/Confetti'
 import { TreasureChestReward } from '../components/TreasureChestReward'
 import { SoundToggle } from '../components/SoundToggle'
 import { SparkleIcon, CheckCircleIcon, ChestIcon } from '../components/icons'
-import { playSound } from '../lib/sound'
-import { aiGenerationEnabled } from '../ai/config'
+import { aiGenerationOn } from '../ai/config'
+import { useAiEnabled } from '../lib/useAiEnabled'
 import { toPracticeStep, conceptForLesson } from '../content/generated'
 import { warmReview, warmReviewAhead, clearReview } from '../ai/reviewPrefetch'
 
-// Mirrors PracticePage's local helpers (which aren't exported there): the
-// animation step duration, the facing helper, the palette builder, and the
-// scaffold expander.
-const STEP_MS = 240
+// Stand-in map for the hook before a review puzzle has loaded (the player isn't
+// shown until `step` exists, so no Run ever plays on it).
+const FALLBACK_MAP: MapConfig = { rows: 1, cols: 1, start: { row: 0, col: 0 }, goal: { row: 0, col: 0 } }
 
-function facingBetween(from: Position, to: Position): Command | null {
-  if (to.row < from.row) return 'up'
-  if (to.row > from.row) return 'down'
-  if (to.col < from.col) return 'left'
-  if (to.col > from.col) return 'right'
-  return null
-}
-
-function buildPracticePalette(step: SequenceStep): PaletteItem[] {
-  const limits = step.cardLimits ?? {}
-  const moves: PaletteItem[] = []
-  const seenMove = new Set<Command>()
-  for (const command of step.availableCommands) {
-    if (seenMove.has(command)) continue
-    seenMove.add(command)
-    moves.push({ key: `m-${command}`, kind: 'move', command, limit: limits[command] })
-  }
-  const actions: PaletteItem[] = []
-  const seenAction = new Set<string>()
-  for (const action of step.availableActions ?? []) {
-    if (seenAction.has(action)) continue
-    seenAction.add(action)
-    actions.push({ key: `a-${action}`, kind: 'action', action, limit: limits[action] })
-  }
-  const blocks: PaletteItem[] = (step.blocks ?? []).map((kind) => ({
-    key: `b-${kind}`,
-    kind,
-    limit: limits[kind],
-  }))
-  return [...moves, ...actions, ...blocks]
-}
 
 function initialNodesFor(step: SequenceStep): ProgramNode[] {
   if (!step.initialProgram) return []
@@ -63,6 +34,7 @@ function initialNodesFor(step: SequenceStep): ProgramNode[] {
 }
 
 export function ReviewPage() {
+  useAiEnabled() // re-renders on AI Preference change
   const { ready, activeLearner, state, recordReview } = useLearner()
 
   // Snapshot the due queue once: recordReview replaces the state object, but the
@@ -81,23 +53,11 @@ export function ReviewPage() {
   const [completedCount, setCompletedCount] = useState(0)
 
   const [program, setProgram] = useState<ProgramNode[]>([])
-  const [explorer, setExplorer] = useState<Position>({ row: 0, col: 0 })
-  const [facing, setFacing] = useState<Command>('right')
-  const [crashed, setCrashed] = useState(false)
-  const [solved, setSolved] = useState(false)
-  const [animating, setAnimating] = useState(false)
-  const [activeTile, setActiveTile] = useState<Position | null>(null)
   const [iterations, setIterations] = useState<Map<string, number> | null>(null)
-  const [feedback, setFeedback] = useState<{ status: 'correct' | 'incorrect'; message: string } | null>(null)
   const [celebrate, setCelebrate] = useState(false)
-  // Fetch-and-carry + teleport run animation (generated review puzzles can
-  // include pickup/drop tasks and teleport pads).
-  const [taskPicked, setTaskPicked] = useState(0)
-  const [taskDropped, setTaskDropped] = useState(0)
-  const [isTeleporting, setIsTeleporting] = useState(false)
-  const [isDeparting, setIsDeparting] = useState(false)
 
   const timers = useRef<number[]>([])
+  const mapColumnRef = useRef<HTMLDivElement>(null)
   const busyRef = useRef(false)
   const loadedRef = useRef(false)
   const isMounted = useRef(true)
@@ -126,18 +86,42 @@ export function ReviewPage() {
     }
   }, [])
 
+  const run = usePuzzleRun({
+    map: step?.map ?? FALLBACK_MAP,
+    check: () =>
+      checkProgram(
+        { map: step!.map, successRule: step!.successRule, optimal: step!.optimal, feedback: step!.feedback },
+        program.map(nodeToInstruction),
+      ),
+    onStart: () => {
+      setIterations(null)
+      setCelebrate(false)
+      mapColumnRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    },
+    onSettle: (outcome) => {
+      setIterations(iterationMap(program, outcome.run))
+      if (!outcome.solved) return
+      setCelebrate(true)
+      const clearCelebrate = window.setTimeout(() => setCelebrate(false), 2000)
+      timers.current.push(clearCelebrate)
+      // Record/count only on the first correct solve of this puzzle, so a re-run
+      // of an already-solved puzzle can't double count.
+      const lesson = currentLessonRef.current
+      if (lesson && step && !recordedRef.current) {
+        recordedRef.current = true
+        recordReview(lesson, lesson.skillIds[0], step.id, true)
+        setCompletedCount((c) => c + 1)
+        clearReview(lesson.id)
+      }
+    },
+  })
+
   const resetPlayState = useCallback(() => {
+    // The run resets itself when the new puzzle's map loads (usePuzzleRun's
+    // map-change effect); here we only clear the page-owned state around it.
     clearTimers()
-    setCrashed(false)
-    setSolved(false)
     setIterations(null)
-    setActiveTile(null)
-    setFeedback(null)
     setCelebrate(false)
-    setTaskPicked(0)
-    setTaskDropped(0)
-    setIsTeleporting(false)
-    setIsDeparting(false)
     setProgram([])
   }, [clearTimers])
 
@@ -183,8 +167,6 @@ export function ReviewPage() {
           recordedRef.current = false
           setStep(practiceStep)
           setProgram(initialNodesFor(practiceStep))
-          setExplorer(practiceStep.map.start)
-          setFacing('right')
           startedAtRef.current = Date.now()
           setIndex(cursor)
           // Keep the next few reviewable lessons warm so advancing feels instant.
@@ -210,7 +192,7 @@ export function ReviewPage() {
 
   useEffect(() => {
     if (!ready || !activeLearner) return
-    if (!aiGenerationEnabled) return
+    if (!aiGenerationOn()) return
     if (loadedRef.current) return
     loadedRef.current = true
     if (queue.length === 0) {
@@ -222,21 +204,13 @@ export function ReviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, activeLearner, queue.length])
 
-  const paletteItems = useMemo(() => (step ? buildPracticePalette(step) : []), [step])
+  const paletteItems = useMemo(() => (step ? buildPalette(step) : []), [step])
 
   function resetRun() {
     clearTimers()
-    if (step) setExplorer(step.map.start)
-    setCrashed(false)
-    setSolved(false)
+    run.reset()
     setIterations(null)
-    setActiveTile(null)
-    setFeedback(null)
     setCelebrate(false)
-    setTaskPicked(0)
-    setTaskDropped(0)
-    setIsTeleporting(false)
-    setIsDeparting(false)
   }
 
   // Reset clears the placed blocks back to the puzzle's starting program (not
@@ -251,95 +225,9 @@ export function ReviewPage() {
     resetRun()
   }
 
-  function handleRun() {
-    if (!step || animating) return
-    const lesson = currentLessonRef.current
-    const instructions = program.map(nodeToInstruction)
-    const result = checkProgram(
-      { map: step.map, successRule: step.successRule, optimal: step.optimal, feedback: step.feedback },
-      instructions,
-    )
-    clearTimers()
-    setAnimating(true)
-    setCrashed(false)
-    setSolved(false)
-    setIterations(null)
-    setFeedback(null)
-    setActiveTile(result.run.path[0])
-    setExplorer(result.run.path[0])
-    setIsTeleporting(false)
-    setIsDeparting(false)
-    setTaskPicked(0)
-    setTaskDropped(0)
-    playSound('runStart')
-
-    const frames = carryFrames(result.run.path, result.run.events)
-    const worldEvents = result.run.worldEvents
-    const teleportSteps = new Set<number>()
-    const teleportDepartSteps = new Set<number>()
-    for (const ev of worldEvents) {
-      if (ev.kind === 'teleport') teleportSteps.add(ev.pathIndex)
-      if (ev.kind === 'teleport-depart') teleportDepartSteps.add(ev.pathIndex)
-    }
-
-    result.run.path.forEach((pos, idx) => {
-      const timer = window.setTimeout(() => {
-        setExplorer(pos)
-        setActiveTile(pos)
-        setIsTeleporting(teleportSteps.has(idx))
-        setIsDeparting(teleportDepartSteps.has(idx))
-        const frame = frames[idx] ?? { picked: 0, dropped: 0 }
-        setTaskPicked((prev) => {
-          if (frame.picked > prev) playSound('pick')
-          return frame.picked
-        })
-        setTaskDropped((prev) => {
-          if (frame.dropped > prev) playSound('place')
-          return frame.dropped
-        })
-        if (idx > 0) {
-          const dir = facingBetween(result.run.path[idx - 1], pos)
-          if (dir) setFacing(dir)
-          playSound('step')
-        }
-      }, idx * STEP_MS)
-      timers.current.push(timer)
-    })
-
-    const endTimer = window.setTimeout(() => {
-      setAnimating(false)
-      setActiveTile(null)
-      setIsTeleporting(false)
-      setIsDeparting(false)
-      const lastFrame = frames[frames.length - 1] ?? { picked: 0, dropped: 0 }
-      setTaskPicked(lastFrame.picked)
-      setTaskDropped(lastFrame.dropped)
-      if (!result.correct && result.run.status !== 'success') setCrashed(true)
-      if (result.correct) {
-        setSolved(true)
-        setCelebrate(true)
-        const clearCelebrate = window.setTimeout(() => setCelebrate(false), 2000)
-        timers.current.push(clearCelebrate)
-      }
-      setIterations(iterationMap(program, result.run))
-      playSound(result.correct ? 'success' : 'error')
-      setFeedback({ status: result.correct ? 'correct' : 'incorrect', message: result.message })
-      // Record/count only on the first correct solve of this puzzle, so a re-run
-      // of an already-solved puzzle can't double count.
-      if (result.correct && lesson && !recordedRef.current) {
-        recordedRef.current = true
-        recordReview(lesson, lesson.skillIds[0], step.id, true)
-        setCompletedCount((c) => c + 1)
-        // Drop the cached puzzle so a future visit regenerates a fresh one.
-        clearReview(lesson.id)
-      }
-    }, result.run.path.length * STEP_MS + 60)
-    timers.current.push(endTimer)
-  }
-
   function bird(): { message: string; mood: BirdMood } {
-    if (feedback?.status === 'correct') return { message: feedback.message, mood: 'celebrate' }
-    if (feedback?.status === 'incorrect') return { message: feedback.message, mood: 'oops' }
+    if (run.feedback?.status === 'correct') return { message: run.feedback.message, mood: 'celebrate' }
+    if (run.feedback?.status === 'incorrect') return { message: run.feedback.message, mood: 'oops' }
     if (step) return { message: step.prompt, mood: 'explain' }
     return { message: 'Let me pull up something to review…', mood: 'explain' }
   }
@@ -377,7 +265,7 @@ export function ReviewPage() {
     )
   }
 
-  if (!aiGenerationEnabled) {
+  if (!aiGenerationOn()) {
     return (
       <div className="lesson-shell mx-auto px-4 pb-20 pt-6 lg:pb-8">
         {header}
@@ -447,48 +335,48 @@ export function ReviewPage() {
                 <SparkleIcon className="h-3.5 w-3.5" /> Review puzzle
               </p>
               <h1 className="puzzle-goal">{step.goal}</h1>
+              <ObjectivesChips map={step.map} />
             </div>
 
             <div className="lesson-workspace__main">
-              <div className="lesson-map-column">
+              <div className="lesson-map-column" ref={mapColumnRef}>
                 <MapGrid
                   map={step.map}
-                  explorer={explorer}
-                  crashed={crashed}
-                  solved={solved}
-                  facing={facing}
-                  activeTile={activeTile}
-                  taskPicked={taskPicked}
-                  taskDropped={taskDropped}
-                  isTeleporting={isTeleporting}
-                  isDeparting={isDeparting}
+                  {...run.frame}
+                  crashed={run.crashed}
+                  solved={run.solved}
+                  loopStuck={run.loopStuck}
                 />
               </div>
 
               <div className="lesson-workspace__controls space-y-4">
+                {run.animating && run.chips.length > 0 ? (
+                  <RunStrip chips={run.chips} activeIndex={run.frame.activeStepIndex} />
+                ) : (
                 <CommandSequence
                   palette={paletteItems}
                   program={program}
-                  disabled={animating}
+                  disabled={run.animating}
                   loopRange={step.loopRange}
                   predicateOptions={step.predicateOptions}
                   onChange={handleProgramChange}
                   iterations={iterations ?? undefined}
                 />
+                )}
 
                 <div className="action-bar">
                   <button
                     type="button"
-                    onClick={handleRun}
-                    disabled={animating || program.length === 0}
-                    className={`btn-success flex cursor-pointer items-center gap-2 ${animating ? 'animate-run-pulse' : ''}`}
+                    onClick={run.handleRun}
+                    disabled={run.animating || program.length === 0}
+                    className={`btn-success flex cursor-pointer items-center gap-2 ${run.animating ? 'animate-run-pulse' : ''}`}
                   >
                     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
                       <path d="M7 5l12 7-12 7z" fill="currentColor" />
                     </svg>
-                    {animating ? 'Running…' : 'Run program'}
+                    {run.animating ? 'Running…' : 'Run program'}
                   </button>
-                  <button type="button" onClick={handleReset} disabled={animating} className="btn-ghost cursor-pointer">
+                  <button type="button" onClick={handleReset} disabled={run.animating} className="btn-ghost cursor-pointer">
                     Reset
                   </button>
                   <Link to="/app" className="btn-ghost ml-auto inline-flex items-center gap-1">
@@ -496,7 +384,7 @@ export function ReviewPage() {
                   </Link>
                 </div>
 
-                {feedback?.status === 'correct' && (
+                {run.feedback?.status === 'correct' && (
                   <div className="next-bar">
                     <button
                       type="button"

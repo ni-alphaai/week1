@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 
-vi.mock('../ai/config', () => ({ aiAdaptiveEnabled: true }))
+vi.mock('../ai/config', () => ({ aiAdaptiveEnabled: true, aiAdaptiveOn: () => true }))
 
 import {
   recommendDirection,

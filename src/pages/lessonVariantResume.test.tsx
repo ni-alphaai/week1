@@ -80,7 +80,7 @@ vi.mock('../content/generated', () => ({
 }))
 vi.mock('../ai/config', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../ai/config')>()
-  return { ...actual, aiGenerationEnabled: true, aiExplainEnabled: false }
+  return { ...actual, aiGenerationEnabled: true, aiExplainEnabled: false, aiGenerationOn: () => true, aiExplainOn: () => false }
 })
 vi.mock('../ai/generation', () => ({ generatePuzzle: vi.fn(async () => null) }))
 vi.mock('../ai/explain', () => ({ getExplanation: vi.fn(async () => ({ text: '', source: 'authored' })) }))

@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import type { Action, Command, Instruction, Position, SequenceStep } from '../types'
+import type { Instruction, MapConfig, SequenceStep } from '../types'
 import { getLesson, registerGeneratedPuzzle } from '../content/registry'
 import { useLearner } from '../context/LearnerContext'
 import { checkProgram } from '../engine/checker'
-import { carryFrames } from '../engine/map'
 import type { RunResult } from '../engine/map'
 import { MapGrid } from '../components/MapGrid'
 import { CommandSequence } from '../components/CommandSequence'
-import type { PaletteItem, ProgramNode } from '../components/CommandSequence'
+import type { ProgramNode } from '../components/CommandSequence'
+import { buildPalette } from '../components/buildPalette'
+import { RunStrip } from '../components/RunStrip'
+import { ObjectivesChips } from '../components/ObjectivesChips'
+import { usePuzzleRun } from '../run/usePuzzleRun'
 import { nodeToInstruction, instructionToNode, iterationMap } from '../components/programNodes'
 import { BadgeToast } from '../components/BadgeToast'
 import { encodePuzzle, type ShareablePuzzle } from '../content/shareCode'
@@ -16,7 +19,8 @@ import { BirdGuide, type BirdMood } from '../components/BirdGuide'
 import { SoundToggle } from '../components/SoundToggle'
 import { SparkleIcon, CompassIcon } from '../components/icons'
 import { playSound } from '../lib/sound'
-import { aiGenerationEnabled } from '../ai/config'
+import { aiGenerationOn } from '../ai/config'
+import { useAiEnabled } from '../lib/useAiEnabled'
 import { generatePuzzle } from '../ai/generation'
 import type { GeneratedPuzzle } from '../ai/generation'
 import { getExplanation } from '../ai/explain'
@@ -25,49 +29,16 @@ import { lessonSuccessRate } from '../adaptivity/mastery'
 import { nextDifficultyDirection } from '../adaptivity/difficulty'
 import { ensurePrefetchDepth, takePrefetched, PREFETCH_QUEUE_DEPTH } from '../ai/practicePrefetch'
 
-const STEP_MS = 240
-
 const DIRECTION_LABEL: Record<'easier' | 'same' | 'harder', string> = {
   easier: 'Easing off',
   same: 'Just right',
   harder: 'Leveling up',
 }
 
-function facingBetween(from: Position, to: Position): Command | null {
-  if (to.row < from.row) return 'up'
-  if (to.row > from.row) return 'down'
-  if (to.col < from.col) return 'left'
-  if (to.col > from.col) return 'right'
-  return null
-}
+// Stand-in map for the hook before a puzzle has loaded (the player isn't shown
+// until `step` exists, so no Run ever plays on it).
+const FALLBACK_MAP: MapConfig = { rows: 1, cols: 1, start: { row: 0, col: 0 }, goal: { row: 0, col: 0 } }
 
-// Builds the editor palette straight from the step's offered cards — mirroring
-// the lesson player's buildPalette. Moves-only steps yield only move cards
-// (backward compatible); loop steps add Repeat/While/If blocks and predicate
-// choices, with per-card `limit`s drawn from the step's cardLimits.
-function buildPracticePalette(step: SequenceStep): PaletteItem[] {
-  const limits = step.cardLimits ?? {}
-  const moves: PaletteItem[] = []
-  const seenMove = new Set<Command>()
-  for (const command of step.availableCommands) {
-    if (seenMove.has(command)) continue
-    seenMove.add(command)
-    moves.push({ key: `m-${command}`, kind: 'move', command, limit: limits[command] })
-  }
-  const actions: PaletteItem[] = []
-  const seenAction = new Set<Action>()
-  for (const action of step.availableActions ?? []) {
-    if (seenAction.has(action)) continue
-    seenAction.add(action)
-    actions.push({ key: `a-${action}`, kind: 'action', action, limit: limits[action] })
-  }
-  const blocks: PaletteItem[] = (step.blocks ?? []).map((kind) => ({
-    key: `b-${kind}`,
-    kind,
-    limit: limits[kind],
-  }))
-  return [...moves, ...actions, ...blocks]
-}
 
 // A step's pre-filled scaffold, if any, expanded into editor nodes.
 function initialNodesFor(step: SequenceStep): ProgramNode[] {
@@ -85,6 +56,7 @@ function puzzleSignature(puzzle: GeneratedPuzzle): string {
 }
 
 export function PracticePage() {
+  useAiEnabled() // re-renders on AI Preference change
   const { lessonId } = useParams()
   const navigate = useNavigate()
   const { ready, activeLearner, state, recordPracticeResult } = useLearner()
@@ -94,35 +66,21 @@ export function PracticePage() {
   const [loading, setLoading] = useState(true)
   const [abstained, setAbstained] = useState(false)
   const [program, setProgram] = useState<ProgramNode[]>([])
-  const [explorer, setExplorer] = useState<Position>({ row: 0, col: 0 })
-  const [facing, setFacing] = useState<Command>('right')
-  const [crashed, setCrashed] = useState(false)
-  const [solved, setSolved] = useState(false)
-  const [animating, setAnimating] = useState(false)
-  const [activeTile, setActiveTile] = useState<Position | null>(null)
-  const [feedback, setFeedback] = useState<{ status: 'correct' | 'incorrect'; message: string } | null>(null)
   const [lastAttempt, setLastAttempt] = useState<{ run: RunResult; instructions: Instruction[] } | null>(null)
   const [explainText, setExplainText] = useState<string | null>(null)
   const [explainLoading, setExplainLoading] = useState(false)
   const [direction, setDirection] = useState<'easier' | 'same' | 'harder'>('same')
   // Per-block loop iteration counts from the last run, surfaced on the cards.
   const [iterations, setIterations] = useState<Map<string, number> | null>(null)
-  // Whether the last run hit a loop that never made progress (loopStuck).
-  const [loopStuck, setLoopStuck] = useState(false)
   // Brief "Link copied!" confirmation after sharing the current puzzle.
   const [shareCopied, setShareCopied] = useState(false)
-  // Fetch-and-carry + teleport run animation (generated practice puzzles can
-  // include pickup/drop tasks and teleport pads).
-  const [taskPicked, setTaskPicked] = useState(0)
-  const [taskDropped, setTaskDropped] = useState(0)
-  const [isTeleporting, setIsTeleporting] = useState(false)
-  const [isDeparting, setIsDeparting] = useState(false)
 
   // Within-session running success, so difficulty adapts round to round.
   const sessionRef = useRef({ attempts: 0, correct: 0 })
   // When the current puzzle was shown, for measuring solve time.
   const startedAtRef = useRef<number>(Date.now())
   const timers = useRef<number[]>([])
+  const mapColumnRef = useRef<HTMLDivElement>(null)
   const isMounted = useRef(true)
   // Single-flight guard: ignore re-entrant loadPuzzle calls while one is running.
   const busyRef = useRef(false)
@@ -150,6 +108,34 @@ export function PracticePage() {
   useEffect(() => {
     if (ready && !activeLearner) navigate('/', { replace: true })
   }, [ready, activeLearner, navigate])
+
+  const run = usePuzzleRun({
+    map: step?.map ?? FALLBACK_MAP,
+    check: () =>
+      checkProgram(
+        { map: step!.map, successRule: step!.successRule, optimal: step!.optimal, feedback: step!.feedback },
+        program.map(nodeToInstruction),
+      ),
+    onStart: () => {
+      setShareCopied(false)
+      setExplainText(null)
+      setIterations(null)
+      mapColumnRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    },
+    onSettle: (outcome) => {
+      const instructions = program.map(nodeToInstruction)
+      setIterations(iterationMap(program, outcome.run))
+      sessionRef.current.attempts += 1
+      if (outcome.solved) sessionRef.current.correct += 1
+      else setLastAttempt({ run: outcome.run, instructions })
+      const solveMs = outcome.solved ? Date.now() - startedAtRef.current : 0
+      recordPracticeResult(lesson!, step!.id, outcome.solved, {
+        program: instructions,
+        optimalSolved: false,
+        solveMs,
+      })
+    },
+  })
 
   // Reads the adaptive difficulty direction for the current session. Used both
   // to drive generation and to label the round; the prefetched puzzle's band may
@@ -185,26 +171,20 @@ export function PracticePage() {
     // StrictMode's double-invoked effect) so we don't double-generate or stomp
     // each other's state.
     if (busyRef.current) return
-    if (!lesson || !aiGenerationEnabled) {
+    if (!lesson || !aiGenerationOn()) {
       setLoading(false)
-      setAbstained(!aiGenerationEnabled)
+      setAbstained(!aiGenerationOn())
       return
     }
     busyRef.current = true
     try {
       clearTimers()
-      setFeedback(null)
+      // The run resets itself when the new puzzle's map loads (usePuzzleRun's
+      // map-change effect); here we only clear the page-owned state around it.
       setExplainText(null)
       setExplainLoading(false)
       setLastAttempt(null)
-      setCrashed(false)
-      setSolved(false)
       setIterations(null)
-      setLoopStuck(false)
-      setTaskPicked(0)
-      setTaskDropped(0)
-      setIsTeleporting(false)
-      setIsDeparting(false)
       setShareCopied(false)
       setProgram([])
 
@@ -253,8 +233,6 @@ export function PracticePage() {
       const practiceStep = toPracticeStep(puzzle, lesson)
       setStep(practiceStep)
       setProgram(initialNodesFor(practiceStep))
-      setExplorer(practiceStep.map.start)
-      setFacing('right')
       // Start the solve-time clock now that a fresh puzzle is on screen.
       startedAtRef.current = Date.now()
       setLoading(false)
@@ -279,22 +257,12 @@ export function PracticePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lessonId])
 
-  const paletteItems = useMemo(() => (step ? buildPracticePalette(step) : []), [step])
+  const paletteItems = useMemo(() => (step ? buildPalette(step) : []), [step])
 
   function resetRun() {
-    clearTimers()
-    if (step) setExplorer(step.map.start)
-    setCrashed(false)
-    setSolved(false)
-    setIterations(null)
-    setLoopStuck(false)
-    setTaskPicked(0)
-    setTaskDropped(0)
-    setIsTeleporting(false)
-    setIsDeparting(false)
+    run.reset()
     setShareCopied(false)
-    setActiveTile(null)
-    setFeedback(null)
+    setIterations(null)
     setExplainText(null)
     setExplainLoading(false)
     setLastAttempt(null)
@@ -303,91 +271,6 @@ export function PracticePage() {
   function handleProgramChange(next: ProgramNode[]) {
     setProgram(next)
     resetRun()
-  }
-
-  function handleRun() {
-    if (!step || !lesson || animating) return
-    const instructions = program.map(nodeToInstruction)
-    const result = checkProgram(
-      { map: step.map, successRule: step.successRule, optimal: step.optimal, feedback: step.feedback },
-      instructions,
-    )
-    clearTimers()
-    setAnimating(true)
-    setCrashed(false)
-    setSolved(false)
-    setLoopStuck(false)
-    setIterations(null)
-    setShareCopied(false)
-    setFeedback(null)
-    setExplainText(null)
-    setActiveTile(result.run.path[0])
-    setExplorer(result.run.path[0])
-    setIsTeleporting(false)
-    setIsDeparting(false)
-    setTaskPicked(0)
-    setTaskDropped(0)
-    playSound('runStart')
-
-    const frames = carryFrames(result.run.path, result.run.events)
-    const worldEvents = result.run.worldEvents
-    const teleportSteps = new Set<number>()
-    const teleportDepartSteps = new Set<number>()
-    for (const ev of worldEvents) {
-      if (ev.kind === 'teleport') teleportSteps.add(ev.pathIndex)
-      if (ev.kind === 'teleport-depart') teleportDepartSteps.add(ev.pathIndex)
-    }
-
-    result.run.path.forEach((pos, index) => {
-      const timer = window.setTimeout(() => {
-        setExplorer(pos)
-        setActiveTile(pos)
-        setIsTeleporting(teleportSteps.has(index))
-        setIsDeparting(teleportDepartSteps.has(index))
-        const frame = frames[index] ?? { picked: 0, dropped: 0 }
-        setTaskPicked((prev) => {
-          if (frame.picked > prev) playSound('pick')
-          return frame.picked
-        })
-        setTaskDropped((prev) => {
-          if (frame.dropped > prev) playSound('place')
-          return frame.dropped
-        })
-        if (index > 0) {
-          const dir = facingBetween(result.run.path[index - 1], pos)
-          if (dir) setFacing(dir)
-          playSound('step')
-        }
-      }, index * STEP_MS)
-      timers.current.push(timer)
-    })
-
-    const endTimer = window.setTimeout(() => {
-      setAnimating(false)
-      setActiveTile(null)
-      setIsTeleporting(false)
-      setIsDeparting(false)
-      const lastFrame = frames[frames.length - 1] ?? { picked: 0, dropped: 0 }
-      setTaskPicked(lastFrame.picked)
-      setTaskDropped(lastFrame.dropped)
-      if (!result.correct && result.run.status !== 'success') setCrashed(true)
-      if (result.correct) setSolved(true)
-      setLoopStuck(result.run.status === 'loopStuck')
-      setIterations(iterationMap(program, result.run))
-      playSound(result.correct ? 'success' : 'error')
-      setFeedback({ status: result.correct ? 'correct' : 'incorrect', message: result.message })
-      sessionRef.current.attempts += 1
-      if (result.correct) sessionRef.current.correct += 1
-      else setLastAttempt({ run: result.run, instructions })
-      // Persist the attempt to mastery (in addition to the in-session bump above).
-      const solveMs = result.correct ? Date.now() - startedAtRef.current : 0
-      recordPracticeResult(lesson, step.id, result.correct, {
-        program: instructions,
-        optimalSolved: false,
-        solveMs,
-      })
-    }, result.run.path.length * STEP_MS + 60)
-    timers.current.push(endTimer)
   }
 
   async function handleExplain() {
@@ -441,8 +324,8 @@ export function PracticePage() {
   function bird(): { message: string; mood: BirdMood } {
     if (explainLoading) return { message: 'Hmm, let me look at the moves you used…', mood: 'explain' }
     if (explainText) return { message: explainText, mood: 'oops' }
-    if (feedback?.status === 'correct') return { message: feedback.message, mood: 'celebrate' }
-    if (feedback?.status === 'incorrect') return { message: feedback.message, mood: 'oops' }
+    if (run.feedback?.status === 'correct') return { message: run.feedback.message, mood: 'celebrate' }
+    if (run.feedback?.status === 'incorrect') return { message: run.feedback.message, mood: 'oops' }
     if (step) return { message: step.prompt, mood: 'explain' }
     return { message: 'Let me build you a fresh puzzle…', mood: 'explain' }
   }
@@ -477,7 +360,7 @@ export function PracticePage() {
         </div>
       </header>
 
-      {!aiGenerationEnabled ? (
+      {!aiGenerationOn() ? (
         <div className="card-elevated mx-auto max-w-md p-8 text-center">
           <h1 className="font-display text-xl font-bold text-[var(--color-text)]">Practice is turned off</h1>
           <p className="mt-2 text-muted">Endless practice puzzles need AI to be switched on.</p>
@@ -510,11 +393,11 @@ export function PracticePage() {
               <span className="step-badge" aria-live="polite">
                 {DIRECTION_LABEL[direction]}
               </span>
-              {feedback?.status === 'incorrect' && lastAttempt && (
+              {run.feedback?.status === 'incorrect' && lastAttempt && (
                 <button
                   type="button"
                   onClick={handleExplain}
-                  disabled={explainLoading || animating}
+                  disabled={explainLoading || run.animating}
                   className="btn-hint"
                   aria-label="Ask Rico to explain my mistake"
                 >
@@ -531,49 +414,48 @@ export function PracticePage() {
                 <SparkleIcon className="h-3.5 w-3.5" /> Fresh puzzle
               </p>
               <h1 className="puzzle-goal">{step.goal}</h1>
+              <ObjectivesChips map={step.map} />
             </div>
 
             <div className="lesson-workspace__main">
-              <div className="lesson-map-column">
+              <div className="lesson-map-column" ref={mapColumnRef}>
                 <MapGrid
                   map={step.map}
-                  explorer={explorer}
-                  crashed={crashed}
-                  solved={solved}
-                  loopStuck={loopStuck}
-                  facing={facing}
-                  activeTile={activeTile}
-                  taskPicked={taskPicked}
-                  taskDropped={taskDropped}
-                  isTeleporting={isTeleporting}
-                  isDeparting={isDeparting}
+                  {...run.frame}
+                  crashed={run.crashed}
+                  solved={run.solved}
+                  loopStuck={run.loopStuck}
                 />
               </div>
 
               <div className="lesson-workspace__controls space-y-4">
+                {run.animating && run.chips.length > 0 ? (
+                  <RunStrip chips={run.chips} activeIndex={run.frame.activeStepIndex} />
+                ) : (
                 <CommandSequence
                   palette={paletteItems}
                   program={program}
-                  disabled={animating}
+                  disabled={run.animating}
                   loopRange={step.loopRange}
                   predicateOptions={step.predicateOptions}
                   iterations={iterations ?? undefined}
                   onChange={handleProgramChange}
                 />
+                )}
 
                 <div className="action-bar">
                   <button
                     type="button"
-                    onClick={handleRun}
-                    disabled={animating || program.length === 0}
-                    className={`btn-success flex cursor-pointer items-center gap-2 ${animating ? 'animate-run-pulse' : ''}`}
+                    onClick={run.handleRun}
+                    disabled={run.animating || program.length === 0}
+                    className={`btn-success flex cursor-pointer items-center gap-2 ${run.animating ? 'animate-run-pulse' : ''}`}
                   >
                     <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
                       <path d="M7 5l12 7-12 7z" fill="currentColor" />
                     </svg>
-                    {animating ? 'Running…' : 'Run program'}
+                    {run.animating ? 'Running…' : 'Run program'}
                   </button>
-                  <button type="button" onClick={resetRun} disabled={animating} className="btn-ghost cursor-pointer">
+                  <button type="button" onClick={resetRun} disabled={run.animating} className="btn-ghost cursor-pointer">
                     Reset
                   </button>
                   <Link to="/app" className="btn-ghost ml-auto inline-flex items-center gap-1">
@@ -581,7 +463,7 @@ export function PracticePage() {
                   </Link>
                 </div>
 
-                {feedback?.status === 'correct' && (
+                {run.feedback?.status === 'correct' && (
                   <div className="next-bar">
                     <button type="button" onClick={() => void loadPuzzle()} className="btn-primary animate-pop-in">
                       Next puzzle

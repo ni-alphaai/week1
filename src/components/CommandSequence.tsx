@@ -47,16 +47,29 @@ const ACTION_LABEL: Record<Action, string> = {
 }
 const DRAG_THRESHOLD_PX = 6
 
-function DragHandle({ locked = false }: { locked?: boolean }) {
+// The grip is the ONLY drag initiator for placed cards. Touching the rest of a
+// card lets the page scroll normally on mobile; only the grip carries
+// `touch-none` so a drag from it never turns into a scroll. Locked (scaffold)
+// cards render a static, non-interactive grip.
+function DragHandle({
+  locked = false,
+  onPointerDown,
+}: {
+  locked?: boolean
+  onPointerDown?: (event: ReactPointerEvent) => void
+}) {
   return (
-    <span
-      className={`cmd-handle flex h-7 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold ${
-        locked ? 'cursor-not-allowed opacity-50' : ''
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label="Drag to reorder"
+      onPointerDown={locked ? undefined : onPointerDown}
+      className={`cmd-handle flex h-8 w-7 shrink-0 items-center justify-center rounded-md text-xs font-bold ${
+        locked ? 'cursor-not-allowed opacity-50' : 'cursor-grab touch-none active:cursor-grabbing'
       }`}
-      aria-hidden="true"
     >
       {locked ? '⊟' : '⠿'}
-    </span>
+    </button>
   )
 }
 
@@ -325,6 +338,8 @@ export function CommandSequence({
   const [ghost, setGhost] = useState<GhostState | null>(null)
   const [dropTarget, setDropTarget] = useState<DropTarget>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [tappedKey, setTappedKey] = useState<string | null>(null)
+  const tapFlashTimer = useRef<number | null>(null)
 
   const sessionRef = useRef<DragSession | null>(null)
   const programRef = useRef(program)
@@ -348,6 +363,22 @@ export function CommandSequence({
     setDraggingId(null)
     setTarget(null)
   }, [setTarget])
+
+  // Briefly mark a palette card as "tapped" so a tap-to-place gets a visible
+  // confirming pulse (the press-down :active state ends the moment the finger
+  // lifts, which is too quick to read on its own).
+  const flashTap = useCallback((key: string) => {
+    setTappedKey(key)
+    if (tapFlashTimer.current) window.clearTimeout(tapFlashTimer.current)
+    tapFlashTimer.current = window.setTimeout(() => setTappedKey(null), 420)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (tapFlashTimer.current) window.clearTimeout(tapFlashTimer.current)
+    },
+    [],
+  )
 
   const defaultPredicate = (): PredicateOption =>
     predicateOptions[0] ?? { predicate: { sensor: 'clear', dir: 'right' }, label: 'Right is clear' }
@@ -442,6 +473,7 @@ export function CommandSequence({
           }
         } else {
           playSound('place')
+          flashTap(session.item.key)
           onChange(insertNodeAt(programRef.current, [], programRef.current.length, makeNode(session.item)))
         }
       } else if (session.active) {
@@ -468,7 +500,7 @@ export function CommandSequence({
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onCancel)
     }
-  }, [clearDrag, computeTarget, makeNode, onChange, setTarget])
+  }, [clearDrag, computeTarget, flashTap, makeNode, onChange, setTarget])
 
   // How many more copies of this stamp may be placed (Infinity = unlimited).
   const remainingFor = (item: PaletteItem): number =>
@@ -625,10 +657,9 @@ export function CommandSequence({
       return (
         <div
           ref={setRef}
-          onPointerDown={(event) => startTree(event, node.id)}
-          className={`block-leaf ${node.locked ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'} touch-none ${paletteToneClass(node.kind)} ${node.locked ? 'block-leaf--locked' : ''} ${dim}`}
+          className={`block-leaf ${paletteToneClass(node.kind)} ${node.locked ? 'block-leaf--locked' : ''} ${dim}`}
         >
-          <DragHandle locked={node.locked} />
+          <DragHandle locked={node.locked} onPointerDown={(event) => startTree(event, node.id)} />
           {node.kind === 'move' ? <MoveLabel command={node.command} /> : <ActionLabel action={node.action} />}
           {!node.locked && removeButton(node.id)}
         </div>
@@ -638,11 +669,8 @@ export function CommandSequence({
     if (node.kind === 'loop') {
       return (
         <div ref={setRef} className={`block-container cmd-card-loop ${node.locked ? 'block-container--locked' : ''} ${dim}`}>
-          <div
-            className={`block-header ${node.locked ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'} touch-none`}
-            onPointerDown={(event) => startTree(event, node.id)}
-          >
-            {DragHandle({ locked: node.locked })}
+          <div className="block-header">
+            <DragHandle locked={node.locked} onPointerDown={(event) => startTree(event, node.id)} />
             <span className="block-keyword">Repeat</span>
             <span className="block-stepper" onPointerDown={(event) => event.stopPropagation()}>
               <button type="button" className="cursor-pointer" disabled={disabled || node.count <= loopRange.min} onClick={() => setCount(node.id, node.count - 1)} aria-label="Fewer repeats">
@@ -665,11 +693,8 @@ export function CommandSequence({
     if (node.kind === 'while') {
       return (
         <div ref={setRef} className={`block-container cmd-card-while ${node.locked ? 'block-container--locked' : ''} ${dim}`}>
-          <div
-            className={`block-header ${node.locked ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'} touch-none`}
-            onPointerDown={(event) => startTree(event, node.id)}
-          >
-            {DragHandle({ locked: node.locked })}
+          <div className="block-header">
+            <DragHandle locked={node.locked} onPointerDown={(event) => startTree(event, node.id)} />
             <span className="block-keyword">While</span>
             {predicatePicker(node)}
             <span className="block-keyword">do</span>
@@ -683,11 +708,8 @@ export function CommandSequence({
 
     return (
       <div ref={setRef} className={`block-container cmd-card-cond ${node.locked ? 'block-container--locked' : ''} ${dim}`}>
-        <div
-          className={`block-header ${node.locked ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'} touch-none`}
-          onPointerDown={(event) => startTree(event, node.id)}
-        >
-          {DragHandle({ locked: node.locked })}
+        <div className="block-header">
+          <DragHandle locked={node.locked} onPointerDown={(event) => startTree(event, node.id)} />
           <span className="block-keyword">If</span>
           {predicatePicker(node)}
           {!node.locked && removeButton(node.id)}
@@ -735,13 +757,14 @@ export function CommandSequence({
                     if (inactive || (event.key !== 'Enter' && event.key !== ' ')) return
                     event.preventDefault()
                     playSound('place')
+                    flashTap(item.key)
                     onChange(insertNodeAt(program, [], program.length, makeNode(item)))
                   }}
                   className={`palette-card animate-pop-in relative touch-none rounded-lg border px-3 py-2 transition select-none ${
                     exhausted
                       ? 'palette-card--exhausted cursor-not-allowed'
                       : 'cursor-grab active:cursor-grabbing'
-                  } ${draggingId === `palette:${item.key}` ? 'opacity-30' : ''} ${paletteToneClass(item.kind)}`}
+                  } ${tappedKey === item.key ? 'palette-card--tapped' : ''} ${draggingId === `palette:${item.key}` ? 'opacity-30' : ''} ${paletteToneClass(item.kind)}`}
                   aria-disabled={inactive}
                 >
                   {item.kind === 'move' && <MoveLabel command={item.command} />}

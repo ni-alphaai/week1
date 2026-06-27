@@ -12,7 +12,9 @@ import {
 import { BadgeIcon, FlameIcon, LockIcon } from '../components/icons'
 import { ProgressRing } from '../components/ProgressRing'
 import { BADGES, BADGE_LABELS } from '../content/badges'
-import { aiEnabled } from '../ai/config'
+import { aiAnyOn } from '../ai/config'
+import { useAiEnabled } from '../lib/useAiEnabled'
+import { AiToggle } from '../components/AiToggle'
 import { avatarClass } from './HomePage'
 
 const SKILL_LABELS: Record<string, string> = {
@@ -90,6 +92,7 @@ function Donut({ segments, size = 132, stroke = 16 }: { segments: Segment[]; siz
 }
 
 export function ParentPage() {
+  useAiEnabled() // re-renders on AI Preference change
   const { ready, activeLearner, state } = useLearner()
 
   if (!ready) {
@@ -126,7 +129,7 @@ export function ParentPage() {
   const struggles = skillStruggles(state)
   const struggleBySkill = new Map(struggles.map((s) => [s.skillId, s]))
   const usage = state.aiUsage
-  const aiActivity = aiEnabled && usage && Object.values(usage).some((value) => value > 0)
+  const aiActivity = aiAnyOn() && usage && Object.values(usage).some((value) => value > 0)
 
   const ranked = skills
     .map(([id, stat]) => ({ id, score: masteryScore(stat), attempts: stat.attempts }))
@@ -158,9 +161,12 @@ export function ParentPage() {
             <h1 className="page-title">{name}</h1>
           </div>
         </div>
-        <Link to="/app" className="btn-ghost !px-3 !py-1.5 !text-sm">
-          Back
-        </Link>
+        <div className="flex items-center gap-2">
+          <AiToggle />
+          <Link to="/app" className="btn-ghost !px-3 !py-1.5 !text-sm">
+            Back
+          </Link>
+        </div>
       </header>
 
       <section className="parent-hero animate-float-in">

@@ -46,6 +46,13 @@ interface MapGridProps {
   searchWindow?: SearchWindow | null
   /** True when a loop is spinning without progress — shows a "stuck" spinner. */
   loopStuck?: boolean
+  /**
+   * When true (default), idle target tiles (goal, undelivered stops, uncollected
+   * keys, pending pickups/drop-offs) pulse a gentle ring so learners can see
+   * where they need to go before pressing Run. Suppressed automatically while a
+   * run is animating so it never clashes with the active-tile glow.
+   */
+  showObjectives?: boolean
 }
 
 const TOKEN_TILE_RATIO = 0.58
@@ -131,7 +138,12 @@ export function MapGrid({
   isDeparting = false,
   searchWindow = null,
   loopStuck = false,
+  showObjectives = true,
 }: MapGridProps) {
+  // Target highlighting only makes sense while the puzzle is idle (no run
+  // animating, not already solved/crashed). During playback the active-tile glow
+  // owns the spotlight.
+  const highlightTargets = showObjectives && activeTile == null && !solved && !crashed
   const checkpoints = map.checkpoints ?? []
   const tasks = map.tasks ?? []
   const teleports = map.teleports ?? []
@@ -246,8 +258,19 @@ export function MapGrid({
       const teleportFlash = isTeleporting && teleportIndex >= 0 && samePos(pos, explorer)
       const teleportDepart = isDeparting && samePos(pos, explorer)
       const counterHit = isCounter && activeTile != null && samePos(pos, activeTile)
+      // A tile is a pending "objective" if the learner still has to reach/act on
+      // it. The hidden search goal is never highlighted (that would reveal it);
+      // the "Find N" banner guides those puzzles instead.
+      const isPendingTarget =
+        (goalVisible && !solved) ||
+        (isCheckpoint && checkpointIndex >= checkpointsDelivered) ||
+        (isKey && keyIndex >= keysCollected) ||
+        (isPickup && pickupIndex >= taskPicked) ||
+        (isDrop && dropIndex >= taskDropped)
+      const showTarget = highlightTargets && isPendingTarget
       const stateClasses = [
         isActive ? 'animate-tile-glow z-10' : '',
+        showTarget ? 'map-tile--target' : '',
         teleportFlash ? 'map-tile--teleport-active map-tile--teleport-arriving' : '',
         teleportDepart ? 'map-tile--teleport-depart-flash' : '',
         counterHit ? 'map-tile--counter-hit' : '',

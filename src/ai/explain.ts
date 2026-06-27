@@ -10,7 +10,7 @@ import type { Instruction, MapConfig, Step, SuccessRule } from '../types'
 import type { RunResult } from '../engine/map'
 import { runInstructions } from '../engine/map'
 import { pickHint } from '../lib/hints'
-import { aiExplainEnabled } from './config'
+import { aiExplainOn } from './config'
 import { buildDiagnostic } from './diagnostic'
 import type { Diagnostic } from './diagnostic'
 import { buildExplainPrompt } from './grounding'
@@ -55,7 +55,7 @@ function fallback(req: ExplainRequest, diagnostic: Diagnostic, reason: string): 
 }
 
 export async function getExplanation(req: ExplainRequest): Promise<ExplainResult> {
-  if (!aiExplainEnabled) {
+  if (!aiExplainOn()) {
     return { text: pickHint(req.authoredHints, req.priorFailCount), source: 'authored' }
   }
 
