@@ -8,6 +8,7 @@ import { BADGES, BADGE_LABELS } from '../content/badges'
 import { aiGenerationOn } from '../ai/config'
 import { useAiEnabled } from '../lib/useAiEnabled'
 import { warmReviewAhead } from '../ai/reviewPrefetch'
+import { dueSkills } from '../adaptivity/mastery'
 import {
   FlameIcon,
   CompassIcon,
@@ -203,24 +204,30 @@ function ProfileGate() {
 }
 
 function HomeDashboard() {
-  const { activeLearner, state, signOut, refreshReviewQueue } = useLearner()
+  const { activeLearner, state, signOut } = useLearner()
   const { enabled, user, signOutParent } = useAuth()
   const navigate = useNavigate()
 
-  // Recompute the spaced-review due queue once on entry (the selector itself is
-  // a no-op after the first run of the local day).
-  useEffect(() => {
-    refreshReviewQueue()
-  }, [refreshReviewQueue])
-
-  const dueCount = state?.review?.dueQueue.length ?? 0
+  // Derive the due count from the same source ReviewPage uses — dueSkills — so
+  // both the badge and the review session always agree on what is due.
+  const now = Date.now()
+  const dueSkillIds = state ? dueSkills(state, now) : []
+  const dueCount = dueSkillIds.length
 
   // Warm the first few reviewable puzzles in the background the moment the
   // review card is in view, so opening Daily Review feels instant. warmReview is
   // idempotent per lesson, so re-runs on state changes are cheap no-ops.
+  // Map skill ids → lesson ids (same logic as ReviewPage's warmAhead) so
+  // warmReviewAhead receives the lesson-id queue it expects.
   useEffect(() => {
     if (!aiGenerationOn() || dueCount === 0) return
-    warmReviewAhead(state?.review?.dueQueue ?? [], 0, state)
+    const allLessons = listLessons()
+    const lessonIds = dueSkillIds
+      .map((skillId) => allLessons.find((l) => l.skillIds.includes(skillId))?.id ?? '')
+      .filter(Boolean)
+    warmReviewAhead(lessonIds, 0, state)
+  // dueSkillIds is a new array reference on every render; use dueCount + state as deps.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, dueCount])
   const lessons = listLessons()
   const completed = state?.completedLessonIds ?? []

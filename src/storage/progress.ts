@@ -1,8 +1,6 @@
 import type { Course, Lesson, Step } from '../types'
 import type { LearnerState, SkillStat, StepStat } from './types'
-import { conceptForLesson } from '../content/generated'
 import { listLessons } from '../content/registry'
-import { dueSkills } from '../adaptivity/mastery'
 import { promote, reset } from '../adaptivity/leitner'
 
 // Per-session cap on time-on-task accumulated from a single openedAt stamp, so
@@ -396,32 +394,6 @@ export function tickTimers(state: LearnerState, now = Date.now()): LearnerState 
     next.stepStats[prog.currentStepId] = stepStat
     prog.openedAt = now
   }
-  return next
-}
-
-// Recomputes the review due queue once per local day. Maps each due skill to
-// the first lesson (in teaching order) that teaches it and has a generator
-// concept, so review puzzles can be served.
-export function refreshDueQueue(state: LearnerState, now = Date.now()): LearnerState {
-  const today = localDateString(new Date(now))
-  if (state.review?.lastDueDate === today) return state
-  const next = clone(state)
-  next.review = next.review ?? { lastReviewedAt: {}, lastDueDate: null, dueQueue: [], boxes: {} }
-  const skills = dueSkills(next, now)
-  const lessons = listLessons()
-  const queue: string[] = []
-  const seen = new Set<string>()
-  for (const skillId of skills) {
-    const lesson = lessons.find(
-      (l) => l.skillIds.includes(skillId) && conceptForLesson(l) !== null,
-    )
-    if (lesson && !seen.has(lesson.id)) {
-      seen.add(lesson.id)
-      queue.push(lesson.id)
-    }
-  }
-  next.review.dueQueue = queue
-  next.review.lastDueDate = today
   return next
 }
 

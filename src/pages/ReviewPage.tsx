@@ -72,7 +72,7 @@ function boxToDirection(box: Box): 'easier' | 'same' | 'harder' {
 
 export function ReviewPage() {
   useAiEnabled() // re-renders on AI Preference change
-  const { ready, activeLearner, state, recordReview, refreshReviewQueue } = useLearner()
+  const { ready, activeLearner, state, recordReview } = useLearner()
 
   // Snapshot the due-skills queue once per session (computed from dueSkills at
   // mount time). Using a ref prevents the session from reshuffling mid-play when

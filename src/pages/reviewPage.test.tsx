@@ -199,7 +199,6 @@ vi.mock('../context/LearnerContext', async () => {
         pendingBadges: [],
         consumePendingBadges: () => [],
         clearPendingBadges: vi.fn(),
-        refreshReviewQueue: vi.fn(),
       }
     },
   }

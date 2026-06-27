@@ -164,6 +164,9 @@ export function LessonPage() {
     if (isReplay) {
       // Replay: start at step 0 with blank editors. lessonProgress is NOT
       // mutated — completedStepIds, status, and completedAt stay intact.
+      // Skill stats, streak, and portfolio artifacts are also NOT mutated:
+      // recordResult is gated on !isReplay in onSettle, so solving steps
+      // during a replay does not count toward mastery or the daily streak.
       setStepIndex(0)
       return
     }
@@ -210,11 +213,13 @@ export function LessonPage() {
       }
       const optimalSolved = outcome.solved && step.type === 'sequence' && step.successRule === 'shortestPath'
       const solveMs = outcome.solved ? Date.now() - stepStartRef.current : 0
-      recordResult(lesson!, step.id, outcome.solved, outcome.run.executed, {
-        program: instructions,
-        optimalSolved,
-        solveMs,
-      })
+      if (!isReplay) {
+        recordResult(lesson!, step.id, outcome.solved, outcome.run.executed, {
+          program: instructions,
+          optimalSolved,
+          solveMs,
+        })
+      }
       if (feedbackRef.current) feedbackRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     },
   })
@@ -912,7 +917,7 @@ export function LessonPage() {
           step={currentStep}
           savedProgram={state?.lessonProgress[lesson.id]?.savedPrograms[currentStep.id]}
           onProgramChange={(p) => saveProgram(lesson.id, currentStep.id, p)}
-          onResult={(correct) => recordResult(lesson, currentStep.id, correct, [])}
+          onResult={(correct) => { if (!isReplay) recordResult(lesson, currentStep.id, correct, []) }}
           onNext={goNext}
           priorFailCount={state?.stepStats[currentStep.id]?.incorrect ?? 0}
           isLastStep={stepIndex + 1 >= totalSteps}

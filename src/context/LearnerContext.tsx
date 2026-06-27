@@ -44,7 +44,6 @@ interface LearnerContextValue {
   ) => void
   recordReview: (lesson: Lesson, skillId: string, stepId: string, correct: boolean) => void
   tickTimers: () => void
-  refreshReviewQueue: () => void
   consumePendingBadges: () => string[]
   clearPendingBadges: () => void
   restartLesson: (lesson: Lesson) => void
@@ -357,10 +356,6 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
     [mutate, applyBadges],
   )
   const tickTimersAction = useCallback(() => mutate((current) => progress.tickTimers(current)), [mutate])
-  const refreshReviewQueue = useCallback(
-    () => mutate((current) => progress.refreshDueQueue(current)),
-    [mutate],
-  )
   const consumePendingBadges = useCallback(() => {
     const out = pendingBadges
     setPendingBadges([])
@@ -425,7 +420,6 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       recordPracticeResult: recordPracticeResultAction,
       recordReview,
       tickTimers: tickTimersAction,
-      refreshReviewQueue,
       consumePendingBadges,
       clearPendingBadges,
       restartLesson,
@@ -450,7 +444,6 @@ export function LearnerProvider({ ownerKey, children }: { ownerKey: string; chil
       recordPracticeResultAction,
       recordReview,
       tickTimersAction,
-      refreshReviewQueue,
       consumePendingBadges,
       clearPendingBadges,
       restartLesson,
