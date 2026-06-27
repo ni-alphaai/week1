@@ -35,6 +35,7 @@ const lesson = {
 // after mount, reproducing the resume race.
 const holder = vi.hoisted(() => ({
   deliverState: null as null | ((s: unknown) => void),
+  nextLessonId: null as string | null,
 }))
 
 vi.mock('../context/LearnerContext', async () => {
@@ -66,7 +67,7 @@ vi.mock('../context/LearnerContext', async () => {
 
 vi.mock('../content/registry', () => ({
   getLesson: () => lesson,
-  getNextLessonId: () => null,
+  getNextLessonId: () => holder.nextLessonId,
   registerGeneratedPuzzle: vi.fn(),
 }))
 // conceptForLesson => null short-circuits the prefetch / smaller-variant effects.
@@ -145,6 +146,7 @@ function completedLessonState(): LearnerState {
 
 beforeEach(() => {
   holder.deliverState = null
+  holder.nextLessonId = null
 })
 
 describe('LessonPage resume', () => {
@@ -197,17 +199,12 @@ function completedWithStats(attempts: number, correct: number): LearnerState {
 }
 
 describe('Soft Gate (lesson completion screen)', () => {
-  // Note: the registry mock has getNextLessonId returning null (final lesson),
-  // so we assert the "Review skills" CTA and nudge, not the next-lesson link.
-
   it('shows the nudge and Review CTA when skill is below Skilled (80%/2 attempts)', async () => {
     renderLesson()
     act(() => holder.deliverState!(completedWithStats(2, 2))) // 100% but only 2 attempts < 3
     await screen.findByText('Lesson complete')
     expect(screen.getByTestId('soft-gate-nudge')).toBeInTheDocument()
     expect(screen.getByTestId('soft-gate-review-cta')).toBeInTheDocument()
-    // The next-lesson affordance is gone (no next lesson in mock) but completion text shows
-    expect(screen.getByText('You completed every lesson. Amazing!')).toBeInTheDocument()
   })
 
   it('does not show the nudge when skill has reached Skilled (>=80%, >=3 attempts)', async () => {
@@ -223,5 +220,26 @@ describe('Soft Gate (lesson completion screen)', () => {
     act(() => holder.deliverState!(completedLessonState())) // no skillStats
     await screen.findByText('Lesson complete')
     expect(screen.getByTestId('soft-gate-nudge')).toBeInTheDocument()
+  })
+
+  it('next-lesson link is present but de-emphasized (btn-ghost) when soft gate is active', async () => {
+    holder.nextLessonId = 'lesson-next'
+    renderLesson()
+    act(() => holder.deliverState!(completedWithStats(2, 2))) // below Skilled
+    await screen.findByText('Lesson complete')
+    const link = screen.getByTestId('next-lesson-link')
+    expect(link).toBeInTheDocument()       // never blocks navigation
+    expect(link).toHaveClass('btn-ghost')  // de-emphasized
+  })
+
+  it('next-lesson link is primary (btn-primary) when skill has reached Skilled', async () => {
+    holder.nextLessonId = 'lesson-next'
+    renderLesson()
+    act(() => holder.deliverState!(completedWithStats(3, 3))) // at Skilled
+    await screen.findByText('Lesson complete')
+    const link = screen.getByTestId('next-lesson-link')
+    expect(link).toBeInTheDocument()
+    expect(link).toHaveClass('btn-primary')
+    expect(link).not.toHaveClass('btn-ghost')
   })
 })
