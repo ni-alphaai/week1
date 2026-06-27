@@ -232,7 +232,7 @@ export function ReviewPage() {
           if (aiGenerationOn() && conceptForLesson(lesson) !== null) {
             try {
               // warmReview uses the per-lesson cache from reviewPrefetch.
-              const generated = await warmReview(lesson, stateRef.current)
+              const generated = await warmReview(lesson, stateRef.current, box)
               if (!isMounted.current) return
               if (generated) {
                 registerGeneratedPuzzle(`review-${lesson.id}`, generated)
