@@ -7,7 +7,7 @@
 import type { GeneratedPuzzle, GeneratedConcept, GenConcept, PuzzleTemplate } from '../ai/generation'
 import type { ConditionalStep, Lesson, MapConfig, SequenceStep, StepFeedback } from '../types'
 import type { Action, Command } from '../types'
-import { isSequenceStep, isConditionalStep } from '../types'
+import { isSequenceStep } from '../types'
 import { runInstructions } from '../engine/map'
 import type { DifficultyDirection } from '../adaptivity/difficulty'
 import { bandForDirection, targetLevelForDirection } from '../adaptivity/difficulty'
@@ -255,12 +255,15 @@ export function authoredPracticeStep(
 // play step, converted to the GeneratedPuzzle shape. Prefers mechanic-bearing steps
 // so the smaller version keeps the lesson's mechanics; falls back to fewest-move
 // overall when no mechanic-bearing step is runnable.
-// Returns null only when the lesson has no runnable authored play step.
+// Sequence steps only — toPracticeStep forces a reachGoal sequence, which would
+// silently drop a conditional step's requiresConditional rule and let a flat path
+// pass; restricting here mirrors authoredPracticeFloor's kind:'sequence'.
+// Returns null only when the lesson has no runnable authored sequence step.
 export function deriveSmallerVariantPuzzle(lesson: Lesson): GeneratedPuzzle | null {
-  type Candidate = { step: SequenceStep | ConditionalStep; moves: number; hasMechanic: boolean }
+  type Candidate = { step: SequenceStep; moves: number; hasMechanic: boolean }
   const runnable: Candidate[] = []
   for (const step of lesson.steps) {
-    if (!isSequenceStep(step) && !isConditionalStep(step)) continue
+    if (!isSequenceStep(step)) continue
     const run = runInstructions(step.map, step.solution)
     if (run.status !== 'success') continue
     runnable.push({
