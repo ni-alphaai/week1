@@ -87,7 +87,6 @@ Create `src/content/badgeEnamel.ts`:
 // src/components/BadgeMedalScene.tsx). Pure data + a resolver — NO three import,
 // so it stays out of the code-split three chunk. Colors are rich, saturated
 // "enamel" tones spread around the hue wheel so the badge grid reads varied.
-import { BADGES } from './badges'
 
 // Explicit color per achievement badge, keyed to its concept. Hues are spread
 // around the wheel so neighbouring badges stay distinct on the grid.
