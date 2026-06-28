@@ -35,6 +35,7 @@ import { SoundToggle } from '../components/SoundToggle'
 import { FlameIcon, CheckCircleIcon, CheckIcon, LightbulbIcon, BadgeIcon, CompassIcon, ChestIcon, ShareIcon } from '../components/icons'
 import { pickHint } from '../lib/hints'
 import { playSound } from '../lib/sound'
+import { TIER_CLASS } from '../lib/tierClass'
 import { BeatPuzzle } from '../components/BeatPuzzle'
 
 const STEP_MS = 260
@@ -612,11 +613,17 @@ export function LessonPage() {
             </div>
           )}
           {showSoftGate && (
-            <div className="soft-gate-nudge mt-5 rounded-lg bg-[var(--color-surface-strong)] px-4 py-3 text-sm text-muted" data-testid="soft-gate-nudge">
-              <p className="font-medium text-[var(--color-text)]">Keep sharpening these skills</p>
-              <p className="soft-gate-nudge__detail mt-0.5">
-                {weakTiers.map((t) => `${t.label}: ${t.tier}`).join(' · ')} — reach Skilled to move on.
-              </p>
+            <div className="soft-gate-nudge mt-5" data-testid="soft-gate-nudge">
+              <p className="soft-gate-nudge__title">Keep sharpening these skills</p>
+              <ul className="soft-gate-nudge__list">
+                {weakTiers.map((t) => (
+                  <li key={t.skillId} className="soft-gate-nudge__row">
+                    <span className="soft-gate-nudge__skill">{t.label}</span>
+                    <span className={`tier-badge ${TIER_CLASS[t.tier]}`}>{t.tier}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="soft-gate-nudge__foot">Reach Skilled to move on.</p>
             </div>
           )}
           <div className="mt-6 flex flex-col gap-2">
@@ -920,7 +927,6 @@ export function LessonPage() {
           onProgramChange={(p) => saveProgram(lesson.id, currentStep.id, p)}
           onResult={(correct) => { if (!isReplay) recordResult(lesson, currentStep.id, correct, []) }}
           onNext={goNext}
-          priorFailCount={state?.stepStats[currentStep.id]?.incorrect ?? 0}
           isLastStep={stepIndex + 1 >= totalSteps}
         />
       )}

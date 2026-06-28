@@ -8,7 +8,6 @@ import {
   masteryTier,
   skillStruggles,
   stuckSteps,
-  type MasteryTier,
 } from '../storage/progress'
 import { BadgeIcon, FlameIcon, LockIcon } from '../components/icons'
 import { ProgressRing } from '../components/ProgressRing'
@@ -18,14 +17,10 @@ import { useAiEnabled } from '../lib/useAiEnabled'
 import { AiToggle } from '../components/AiToggle'
 import { avatarClass } from './HomePage'
 import { BadgeDetailCard } from '../components/BadgeDetailCard'
+import { BadgeSortToggle } from '../components/BadgeSortToggle'
+import { sortBadgeIds, formatBadgeDate, type BadgeSort } from '../content/badgeSort'
 import { skillLabel } from '../content/skillLabels'
-
-const TIER_CLASS: Record<MasteryTier, string> = {
-  Novice: 'tier--novice',
-  Apprentice: 'tier--apprentice',
-  Skilled: 'tier--skilled',
-  Master: 'tier--master',
-}
+import { TIER_CLASS } from '../lib/tierClass'
 
 interface Segment {
   value: number
@@ -76,6 +71,7 @@ export function ParentPage() {
   useAiEnabled() // re-renders on AI Preference change
   const { ready, activeLearner, state } = useLearner()
   const [selectedBadge, setSelectedBadge] = useState<string | null>(null)
+  const [badgeSort, setBadgeSort] = useState<BadgeSort>('rarity')
 
   if (!ready) {
     return <div className="flex min-h-full items-center justify-center text-muted">Loading…</div>
@@ -106,6 +102,8 @@ export function ParentPage() {
   const notYet = Math.max(0, totalPuzzles - puzzlesSolved)
   const skills = Object.entries(state.skillStats)
   const badges = state.badges ?? []
+  const acquiredAt = state.badgeAcquiredAt ?? {}
+  const sortedBadges = sortBadgeIds(badges, badgeSort, acquiredAt, () => true)
   const lockedBadges = BADGES.filter((b) => !badges.includes(b.id))
   const stuck = stuckSteps(state)
   const struggles = skillStruggles(state)
@@ -166,11 +164,15 @@ export function ParentPage() {
       </section>
 
       <section className="mt-6">
-        <h2 className="section-title mb-2">Badges</h2>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h2 className="section-title">Badges</h2>
+          {badges.length > 1 && <BadgeSortToggle value={badgeSort} onChange={setBadgeSort} />}
+        </div>
         {badges.length > 0 ? (
           <div className="flex flex-wrap gap-2">
-            {badges.map((id) => {
+            {sortedBadges.map((id) => {
               const meta = badgeMeta(id)
+              const earnedOn = formatBadgeDate(acquiredAt[id])
               return (
                 <button
                   key={id}
@@ -179,7 +181,11 @@ export function ParentPage() {
                   title={meta.blurb}
                   onClick={() => setSelectedBadge(id)}
                 >
-                  <BadgeIcon className="h-5 w-5" /> {meta.title}
+                  <BadgeIcon className="h-5 w-5" />
+                  <span className="badge-chip__text">
+                    <span className="badge-chip__title">{meta.title}</span>
+                    {earnedOn && <span className="badge-chip__date">{earnedOn}</span>}
+                  </span>
                 </button>
               )
             })}
@@ -313,19 +319,17 @@ export function ParentPage() {
             No practice yet. Progress shows up once {name} starts a lesson.
           </p>
         ) : (
-          <div className="space-y-2">
+          <div className="card mastery-list">
             {skills.map(([skillId, stat]) => {
               const score = masteryScore(stat)
               const tier = masteryTier(stat)
               return (
-                <div key={skillId} className="card p-4">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 font-medium text-[var(--color-text)]">
+                <div key={skillId} className="mastery-row">
+                  <div className="mastery-row__head">
+                    <span className="mastery-row__skill">
                       {skillLabel(skillId)}
                       {(struggleBySkill.get(skillId)?.struggles ?? 0) > 0 && (
-                        <span className="rounded-full bg-[var(--color-surface-strong)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-soft">
-                          needs review
-                        </span>
+                        <span className="mastery-row__flag">needs review</span>
                       )}
                     </span>
                     <span className={`tier-badge ${TIER_CLASS[tier]}`}>{tier}</span>
@@ -333,7 +337,7 @@ export function ParentPage() {
                   <div className="progress-track">
                     <div className="progress-fill" style={{ width: `${score}%` }} />
                   </div>
-                  <p className="mt-1.5 text-xs text-muted">
+                  <p className="mastery-row__meta">
                     {score}% · {stat.attempts} attempts
                     {stat.struggles > 0 ? ` · extra tries ${stat.struggles}×` : ''}
                   </p>

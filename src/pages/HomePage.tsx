@@ -24,6 +24,8 @@ import { SoundToggle } from '../components/SoundToggle'
 import { playSound } from '../lib/sound'
 import { BadgeMedalGrid } from '../components/BadgeMedalGrid'
 import { BadgeDetailCard } from '../components/BadgeDetailCard'
+import { BadgeSortToggle } from '../components/BadgeSortToggle'
+import { sortBadgeIds, type BadgeSort } from '../content/badgeSort'
 
 const AVATAR_COLORS = [
   'bg-[#6bcb3d]',
@@ -227,17 +229,21 @@ function HomeDashboard() {
   const earnedBadges = useMemo(() => state?.badges ?? [], [state?.badges])
   const nextGoal = BADGES.find((badge) => !earnedBadges.includes(badge.id)) ?? null
   const [selectedBadge, setSelectedBadge] = useState<string | null>(null)
+  const [badgeSort, setBadgeSort] = useState<BadgeSort>('rarity')
+  const acquiredAt = useMemo(() => state?.badgeAcquiredAt ?? {}, [state?.badgeAcquiredAt])
 
   // Memoized so HomePage re-renders don't hand BadgeMedalGrid a fresh array
   // each time (which would otherwise tear down and rebuild the WebGL scene).
+  // Reordering on a sort change does rebuild the scene — that's a deliberate,
+  // infrequent user action, so the churn is acceptable.
   const badgeItems = useMemo(
     () =>
-      listAllBadgeIds().map((id) => ({
+      sortBadgeIds(listAllBadgeIds(), badgeSort, acquiredAt, (id) => earnedBadges.includes(id)).map((id) => ({
         badgeId: id,
         tier: badgeMeta(id).tier,
         earned: earnedBadges.includes(id),
       })),
-    [earnedBadges],
+    [earnedBadges, acquiredAt, badgeSort],
   )
   const earnedCount = badgeItems.filter((i) => i.earned).length
   const totalCount = badgeItems.length
@@ -277,7 +283,7 @@ function HomeDashboard() {
           )}
           <SoundToggle />
           <Link to="/parent" onClick={() => playSound('click')} className="btn-ghost !px-3 !py-1.5 !text-sm">
-            Parents
+            Progress
           </Link>
         </div>
       </header>
@@ -343,7 +349,10 @@ function HomeDashboard() {
       <section className="treasures animate-float-in" style={{ animationDelay: '0.14s' }}>
         <div className="treasures__head">
           <h2 className="treasures__title">Your treasures</h2>
-          <span className="treasures__count">{earnedCount} of {totalCount}</span>
+          <div className="treasures__head-end">
+            {earnedCount > 0 && <BadgeSortToggle value={badgeSort} onChange={setBadgeSort} />}
+            <span className="treasures__count">{earnedCount} of {totalCount}</span>
+          </div>
         </div>
         <BadgeMedalGrid
           items={badgeItems}

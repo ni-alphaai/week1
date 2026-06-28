@@ -949,6 +949,21 @@ body {
   padding: 0.4rem 0.85rem;
   font-size: 0.85rem;
 }
+.badge-chip__text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.15;
+}
+.badge-chip__title {
+  font-weight: 800;
+}
+.badge-chip__date {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.72;
+}
 
 /* ── Badge tier frames ────────────────────────────────────────────────────────
    Applied to .badge-tile (grid) and the medal container in .badge-detail-card.
@@ -1336,6 +1351,82 @@ div.badge-tile:hover {
   background: linear-gradient(135deg, #ffe08a, #f5b73c);
 }
 
+/* Soft-gate nudge on the lesson-complete screen: one clean row per
+   below-Skilled skill, each with its tier badge. */
+.soft-gate-nudge {
+  border-radius: 0.75rem;
+  background: var(--color-surface-strong);
+  padding: 0.85rem 1rem;
+  text-align: left;
+}
+.soft-gate-nudge__title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--color-text);
+}
+.soft-gate-nudge__list {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.soft-gate-nudge__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.soft-gate-nudge__skill {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.soft-gate-nudge__foot {
+  margin-top: 0.6rem;
+  font-size: 0.78rem;
+  color: var(--color-soft);
+}
+
+/* Skills & mastery: one card, divided into rows (was a stack of separate cards). */
+.mastery-list {
+  padding: 0.25rem 0;
+}
+.mastery-row {
+  padding: 0.85rem 1rem;
+}
+.mastery-row + .mastery-row {
+  border-top: 1px solid var(--color-border);
+}
+.mastery-row__head {
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.mastery-row__skill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.mastery-row__flag {
+  border-radius: 9999px;
+  background: var(--color-surface-strong);
+  padding: 0.1rem 0.5rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-soft);
+}
+.mastery-row__meta {
+  margin-top: 0.45rem;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+
 /* Primary action: the next quest. The most visually dominant card on the page. */
 .quest-cta {
   display: flex;
@@ -1497,6 +1588,39 @@ div.badge-tile:hover {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-soft);
+}
+.treasures__head-end {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Segmented control to sort a badge gallery (rarity / date). */
+.badge-sort {
+  display: inline-flex;
+  border-radius: 9999px;
+  background: var(--color-surface-strong);
+  padding: 0.15rem;
+}
+.badge-sort__btn {
+  border: none;
+  background: transparent;
+  border-radius: 9999px;
+  padding: 0.2rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-soft);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.badge-sort__btn:hover {
+  color: var(--color-text);
+}
+.badge-sort__btn--active {
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
 }
 .trophy-shelf {
   display: grid;

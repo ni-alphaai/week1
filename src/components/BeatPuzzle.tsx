@@ -98,7 +98,6 @@ interface BeatPuzzleProps {
   onProgramChange?: (program: ProgramNode[]) => void
   onResult: (correct: boolean) => void
   onNext: () => void
-  priorFailCount: number
   isLastStep: boolean
 }
 
@@ -108,7 +107,6 @@ export function BeatPuzzle({
   onProgramChange,
   onResult,
   onNext,
-  priorFailCount,
   isLastStep,
 }: BeatPuzzleProps) {
   useAiEnabled() // re-renders on AI Preference change
@@ -179,8 +177,9 @@ export function BeatPuzzle({
 
   const firstWrongBeat = feedback ? (check?.firstWrongBeat ?? null) : null
   const hintCount = step.feedback.hints.length
-  const autoHintLevel = feedback === 'incorrect' ? priorFailCount : 0
-  const hintLevel = Math.max(manualHintLevel, autoHintLevel)
+  // Hints appear ONLY when the learner asks for one — never auto-revealed on a
+  // failed run. Matches LessonPage's click-only hint behavior.
+  const hintLevel = manualHintLevel
   const activeHint = hintLevel > 0 ? pickHint(step.feedback.hints, hintLevel - 1) : null
   const canAskHint = hintLevel < hintCount
 

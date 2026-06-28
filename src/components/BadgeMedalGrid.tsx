@@ -62,7 +62,17 @@ export function BadgeMedalGrid({ items, onSelect, className, interactive = true,
   // Content signature so a referentially-new but content-equal `items` array
   // doesn't tear down and rebuild the WebGL context every render (which would
   // exhaust the browser's context cap and blank the medals).
-  const signature = items.map((it) => `${it.badgeId}:${it.tier}:${it.earned ? 1 : 0}`).join('|')
+  //
+  // Order-INDEPENDENT on purpose: re-sorting the gallery hands us the same
+  // badges in a new order. The scene reads each tile's live bounding rect every
+  // frame, and tiles are keyed by badgeId so React moves (not recreates) the
+  // DOM nodes — so a pure reorder needs no rebuild; the medals follow their
+  // tiles. Recreating the renderer on the same canvas after forceContextLoss()
+  // yields a dead context (blank coins), so we must NOT rebuild on reorder.
+  const signature = items
+    .map((it) => `${it.badgeId}:${it.tier}:${it.earned ? 1 : 0}`)
+    .sort()
+    .join('|')
 
   useEffect(() => {
     if (!supportsWebGL() || prefersReducedMotion()) return

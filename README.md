@@ -10,6 +10,8 @@ AI-assisted explanations and verified AI-generated practice puzzles layered on
 top. The AI features are env-guarded and fail closed to authored content, so the
 app runs identically (and fully offline) with AI switched off.
 
+**▶ Live app: https://brillant-95d1d3.web.app**
+
 ## What it does
 
 - **Interactive lessons**, not videos or walls of text. Each lesson is a short
@@ -104,6 +106,21 @@ npm run preview
 
 ## Architecture
 
+The app is layered so authoring, learner logic, persistence, and AI stay
+independent. Two rules drive most of the design:
+
+1. **The engine is the only authority on correctness.** `src/engine/` holds the
+   deterministic map runner, beat engine, BFS solver, difficulty scorer, and
+   verifier. Nothing — including AI-generated puzzles and shared solutions — is
+   rendered until the engine validates it.
+2. **AI fails closed.** Every model call goes through a single seam,
+   `generateText()` in `src/ai/aiClient.ts`, gated by `VITE_AI_*` flags. Explain,
+   generation, grounding, leak-guard, and prefetch all flow through it; any error
+   or policy leak falls back to authored content, so the app behaves identically
+   (and offline) with AI off.
+
+### Layers (`src/`)
+
 - `src/types.ts` — domain types (commands, maps, instructions, lessons, beat puzzles).
 - `src/engine/` — deterministic map runner, beat engine, BFS solver, difficulty
   scorer, and verifier. The sole authority on whether any puzzle or solution is
@@ -122,10 +139,36 @@ npm run preview
   backend ready to drop in behind the same interface.
 - `src/context/` — `AuthContext` (optional Firebase auth) and `LearnerContext`
   (active learner, progress, and actions).
+- `src/run/` — converts an engine `RunResult` into a timeline of render frames
+  (`timeline.ts`), played by `usePuzzleRun.ts`; shared by all four player pages.
 - `src/components/` — map grid, command builder, beat lane/puzzle, bird guide, feedback.
-- `src/pages/` — home, course path, lesson player, practice player, parent dashboard.
+- `src/pages/` — home, course path, lesson player, practice player, review,
+  share, and parent dashboard.
+- `src/lib/` — auth gate, AI preference toggle, hints, and sound.
 - `functions/` — optional OpenAI proxy Cloud Function that holds the API key
   server-side so it never ships in the browser bundle.
+
+## User flow
+
+**Learner.** From **Home** (pick or create a profile; see streak, progress bar,
+badges, and the treasure-chest reward) the learner opens the **Course** path,
+where lessons unlock as earlier ones are completed. A **Lesson** teaches one
+concept, then runs hands-on puzzles: drag command cards (and nest them in
+Repeat / While / If blocks), press Run, and get instant engine-checked feedback.
+Escalating hints nudge without spoiling, capped by a "watch Rico show you"
+solution replay; a stuck learner can drop to a smaller authored variant. Finishing
+a lesson awards a badge and unlocks the next. **Practice** then offers endless
+adaptive puzzles aimed at the learner's success band, and **Review** brings due
+skills back on a Leitner spaced-repetition schedule. All four player pages —
+Lesson, Practice, Review, Share — reuse the same `src/run/` timeline player.
+
+**Sharing.** Any solved puzzle can be shared via `/share/:code`. These links
+bypass the auth gate so families open them without logging in, and every shared
+solution is re-verified by the engine before it renders; the page never reads or
+writes learner state.
+
+**Parent.** `/parent` shows a dashboard of per-skill mastery tiers, puzzle-outcome
+breakdowns, day streaks, earned badges, and the child's recent creations.
 
 ## Firebase (optional, for cloud sync + deploy)
 
