@@ -80,6 +80,9 @@ function getOpenAiCallable(): Promise<AiCallable | null> {
   openaiCallable = (async () => {
     if (!isFirebaseEnabled || !firebaseApp) return null
     try {
+      // Attach an App Check token on the OpenAI path too (the Gemini path inits
+      // it via getModel). Without this, enforceAppCheck would block this proxy.
+      await ensureAppCheck()
       const { getFunctions, httpsCallable } = await import('firebase/functions')
       const fn = httpsCallable(getFunctions(firebaseApp!), 'aiGenerate')
       return fn as unknown as AiCallable

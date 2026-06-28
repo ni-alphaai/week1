@@ -43,13 +43,21 @@ function reasoningEffortFor(model: string): 'none' | 'low' | 'medium' {
 export const aiGenerate = onCall(
   {
     secrets: [OPENAI_API_KEY],
-    // Flip to true once App Check (reCAPTCHA) is configured on the client to
-    // block abuse of this proxy from outside your app.
+    // Defense in depth: the handler also requires request.auth (below). App
+    // Check adds app-attestation so only your client — not a scripted caller
+    // with the project ID — can reach this proxy. Flip to true once reCAPTCHA
+    // (VITE_RECAPTCHA_SITE_KEY) is configured on the client.
     enforceAppCheck: false,
     timeoutSeconds: 180,
     memory: '256MiB',
   },
   async (request) => {
+    // Require a signed-in caller. Without this the proxy is an open relay to a
+    // paid OpenAI key: anyone with the project ID could call it and burn tokens.
+    // The client fails closed to authored content when this rejects.
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Sign-in is required to use AI.')
+    }
     const system = asBoundedString(request.data?.system, MAX_INPUT_CHARS)
     const prompt = asBoundedString(request.data?.prompt, MAX_INPUT_CHARS)
     if (!system || !prompt) {
@@ -84,8 +92,11 @@ export const aiGenerate = onCall(
       const text = completion.choices[0]?.message?.content?.trim() ?? ''
       return { text }
     } catch (err) {
-      // Surface a generic error; the client fails closed to authored content.
-      throw new HttpsError('internal', 'AI request failed', String(err))
+      // Log the real error server-side only. Returning it as HttpsError details
+      // would serialize the raw provider error to the browser; keep it generic.
+      // The client fails closed to authored content on any error.
+      console.error('aiGenerate failed', err)
+      throw new HttpsError('internal', 'AI request failed')
     }
   },
 )
