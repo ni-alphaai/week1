@@ -27,7 +27,7 @@
 - Test: `src/content/badgeEnamel.test.ts`
 
 **Interfaces:**
-- Consumes: `BADGES` from `./badges` (to key the per-concept palette and let the test assert coverage).
+- Consumes: nothing (pure module; the *test* imports `BADGES` from `./badges` to assert coverage, but the module itself has no imports).
 - Produces:
   - `BADGE_ENAMEL: Record<string, string>` — explicit lowercase `#rrggbb` enamel color per achievement badge id.
   - `enamelColorFor(id: string): string` — returns the mapped color, or a deterministic hash→hue `#rrggbb` for unmapped ids (lesson-award badges, unknowns). Stable per id.
@@ -144,10 +144,6 @@ export function enamelColorFor(id: string): string {
   if (explicit) return explicit
   return hslToHex(hashHue(id), 0.62, 0.5)
 }
-
-// Touch BADGES so a future badge id added without an enamel entry is at least
-// import-visible here; the test asserts full coverage of achievement badges.
-void BADGES
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -158,7 +154,7 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Type-check**
 
 Run: `npx tsc -b`
-Expected: clean (no errors). If `void BADGES` trips `noUnusedLocals`-style complaints, it will not — `void` expression statements are allowed; the import is used.
+Expected: clean (no errors). The module has no imports, so there are no unused-local concerns.
 
 - [ ] **Step 6: Commit**
 
