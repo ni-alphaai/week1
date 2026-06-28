@@ -5,16 +5,7 @@
 import { useCallback, useEffect, useId, useRef, type ReactNode } from 'react'
 import { badgeMeta } from '../content/badges'
 import { emblemFor } from './badgeEmblems'
-
-// ─── Reduced-motion helper ────────────────────────────────────────────────────
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
-}
+import { prefersReducedMotion } from '../lib/webgl'
 
 // ─── Focus trap ───────────────────────────────────────────────────────────────
 
@@ -266,10 +257,12 @@ export function BadgeDetailCard({
             {`${tierLabel} · ${rarityLabel}`}
           </p>
 
-          {/* Blurb */}
-          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            {meta.blurb}
-          </p>
+          {/* Blurb — only shown for earned badges; locked badges see it in the "How to earn" line */}
+          {earned && (
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              {meta.blurb}
+            </p>
+          )}
 
           {/* Earned state */}
           <div className="pt-1">{earnedLine}</div>

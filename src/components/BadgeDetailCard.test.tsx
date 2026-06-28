@@ -153,4 +153,27 @@ describe('BadgeDetailCard — close interactions', () => {
     await user.click(dialog)
     expect(onClose).not.toHaveBeenCalled()
   })
+
+  it('restores focus to the previously-focused element after the dialog unmounts', () => {
+    // Render a trigger button and focus it before opening the card.
+    const { getByTestId, unmount: unmountTrigger } = render(
+      <button type="button" data-testid="trigger">
+        Open badge
+      </button>,
+    )
+    const trigger = getByTestId('trigger') as HTMLElement
+    trigger.focus()
+    expect(document.activeElement).toBe(trigger)
+
+    // Mount the dialog (focus moves to close button inside).
+    const { unmount } = renderCard()
+    const closeBtn = screen.getByRole('button', { name: /close/i })
+    expect(document.activeElement).toBe(closeBtn)
+
+    // Unmounting the dialog should restore focus to the trigger.
+    unmount()
+    expect(document.activeElement).toBe(trigger)
+
+    unmountTrigger()
+  })
 })

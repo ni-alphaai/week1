@@ -343,7 +343,6 @@ function HomeDashboard() {
         <BadgeMedalGrid
           items={badgeItems}
           onSelect={(id) => setSelectedBadge(id)}
-          className="trophy-shelf"
         />
         {earnedCount === 0 && (
           <p className="treasures__hint">

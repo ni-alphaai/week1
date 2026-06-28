@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { render, container as _container } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { BADGES } from '../content/badges'
 import { emblemFor } from './badgeEmblems'
 

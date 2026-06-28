@@ -131,7 +131,7 @@ export function badgeMeta(id: string): BadgeMeta {
   }
 
   // 3. Unknown — safe fallback
-  return { title: id, blurb: '', rarity: 'common', tier: 'bronze' }
+  return { title: id, blurb: '', rarity: 'common', tier: tierForRarity('common') }
 }
 
 /**

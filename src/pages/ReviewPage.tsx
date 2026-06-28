@@ -292,7 +292,7 @@ export function ReviewPage() {
         busyRef.current = false
       }
     },
-    [resetPlayState, warmAhead, recordReview],
+    [resetPlayState, warmAhead],
   )
 
   useEffect(() => {

@@ -219,7 +219,7 @@ export function ParentPage() {
       </section>
       {selectedBadge !== null && (() => {
         const allBadgeIds = listAllBadgeIds()
-        const earnedCount = badges.length
+        const earnedCount = allBadgeIds.filter((id) => badges.includes(id)).length
         const totalCount = allBadgeIds.length
         return (
           <BadgeDetailCard
