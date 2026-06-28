@@ -107,24 +107,27 @@ const TIER_RIM_LIGHT: Record<BadgeTier, number> = {
 }
 const LOCKED_RIM_LIGHT = 0x6f8bb0
 
-// Diamond is a dielectric gem, not a metal: near-zero metalness, mirror-smooth,
-// strong environment reflections, and iridescence for the rainbow gem shimmer.
-// Shared by both the plain coin material and the engraved face material so the
-// trophy tier looks identical whether or not its emblem heightfield has loaded.
+// Diamond is a dielectric gem, not a metal. Toned down from the earlier
+// "glowing bulb": no emissive self-glow, default reflectivity, and a calmer
+// environment intensity, so it reads as cool clear ice catching light. The
+// colour punch now comes from the WHOLE-FACE holographic shimmer — a wide
+// iridescence (thin-film) band whose hue sweeps the full spectrum as the coin
+// rotates. Shared by the coin-body material and the engraved face material so
+// the trophy tier looks identical whether or not its heightfield has loaded.
 const DIAMOND_GEM = {
   color: TIER_COLOR.diamond,
   metalness: 0.1,
   roughness: TIER_ROUGHNESS.diamond,
   clearcoat: 1,
-  clearcoatRoughness: 0.03,
-  envMapIntensity: 3,
-  ior: 2.4,
-  reflectivity: 1,
+  clearcoatRoughness: 0.06,
+  envMapIntensity: 1,
+  ior: 2.2,
+  reflectivity: 0.5,
   iridescence: 1,
-  iridescenceIOR: 1.8,
-  iridescenceThicknessRange: [120, 480] as [number, number],
+  iridescenceIOR: 1.6,
+  iridescenceThicknessRange: [100, 800] as [number, number],
   emissive: new THREE.Color(TIER_EMISSIVE.diamond),
-  emissiveIntensity: 0.18,
+  emissiveIntensity: 0,
 } as const
 
 function clamp(x: number, lo: number, hi: number): number {
