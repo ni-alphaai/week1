@@ -16,16 +16,20 @@ import { setupRenderer, makeStudioEnvironment } from './threeEnv'
 // screen rectangle. This is the canonical three.js "multiple elements, one
 // renderer" technique. We never make a renderer/context per tile.
 //
-// ── One coherent medallion ────────────────────────────────────────────────────
+// ── One coherent medallion (CS:GO operation-coin language) ─────────────────────
 // Every badge is the SAME struck-coin medallion (a LatheGeometry with a raised
-// rim and a recessed field) in its tier metal. Identity comes from the engraved
-// emblem and the bronze/silver/gold metal, not from the shape. The emblem is
-// struck INTO the same metal via a bump map (tone-on-tone) rather than a pasted
-// coloured disc. A small tier-tinted ribbon sits behind the coin. Earned coins
-// catch a slow shine sweep and tilt toward the cursor on hover; locked badges
-// render as a dim, matte, un-struck blank. A procedural studio environment (see
-// ./threeEnv) gives the metal real reflections. In the single-medal detail view
-// (`draggable`), the pointer can grab and spin the medallion with inertia.
+// rim, a reeded/milled edge, and a recessed field) — modelled on CS:GO operation
+// challenge coins. Identity comes from the engraved emblem and the tier finish,
+// not from the shape. Struck INTO the same field via a tone-on-tone bump map are
+// the badge emblem PLUS the coin's signature framing: two laurel branches arcing
+// up the flanks and a crest of three stars. The tier is the finish: silver and
+// gold are polished metals; diamond is the top trophy — a faceted ice-blue gem
+// (low-metalness, iridescent, mirror-smooth) rather than a metal. A tier-tinted
+// ribbon sits behind the coin. Earned coins catch a slow shine sweep and tilt
+// toward the cursor on hover; locked badges render as a dim, matte, un-struck
+// blank. A procedural studio environment (see ./threeEnv) gives the metal real
+// reflections. In the single-medal detail view (`draggable`), the pointer can
+// grab and spin the medallion with inertia.
 
 export interface BadgeMedalSceneTile {
   badgeId: string
@@ -46,31 +50,81 @@ export interface BadgeMedalSceneController {
   dispose(): void
 }
 
+// Base albedo per tier. silver/gold are metals; diamond is the icy-blue gem base
+// (its look comes mostly from the gem material params below, not this colour).
 const TIER_COLOR: Record<BadgeTier, number> = {
-  bronze: 0xcd7f32,
   silver: 0xd6dade,
   gold: 0xf5c542,
+  diamond: 0xbfe9ff,
 }
 
 const TIER_EMISSIVE: Record<BadgeTier, number> = {
-  bronze: 0x3a2208,
   silver: 0x2a2d31,
   gold: 0x6b4a00,
+  diamond: 0x10394f,
 }
 
-// Per-tier roughness — gold polished mirror-bright, bronze a touch softer.
+// Per-tier roughness — gold polished mirror-bright, silver a touch softer,
+// diamond glass-smooth so highlights read as sharp gem glints.
 const TIER_ROUGHNESS: Record<BadgeTier, number> = {
-  bronze: 0.3,
   silver: 0.22,
   gold: 0.18,
+  diamond: 0.05,
 }
 
-// Deeper, matte fabric colours for the ribbon, distinct from the bright metal.
+// Deeper, matte fabric colours for the ribbon, distinct from the bright coin.
 const RIBBON_COLOR: Record<BadgeTier, number> = {
-  bronze: 0x8a5a2b,
   silver: 0x8a9197,
   gold: 0xc89b1a,
+  diamond: 0x2f7fb0,
 }
+
+// Grazing-angle sheen tint per metal tier. Polished metal brightens toward its
+// own specular colour at the rim, so silver picks up a cool white and gold a
+// warm white-gold. Fed to the Fresnel injection in enhanceMetalMaterial.
+const TIER_RIM: Record<BadgeTier, number> = {
+  silver: 0xeef4ff,
+  gold: 0xffe9ac,
+  diamond: 0xffffff, // unused — diamond is the gem material, not enhanced metal
+}
+
+// Locked finish: a dark blued-steel coin that still takes the struck emblem in
+// relief, so a locked badge reads as an un-awarded medallion (a preview of the
+// prize) rather than a blank disc. A faint cool Fresnel rim keeps the dark coin
+// from disappearing against the page.
+const LOCKED_COLOR = 0x2b313b
+const LOCKED_RIM = 0x6f8bb0
+
+// Per-tier RIM-LIGHT colour (the directional fill raking the coin from below-
+// left), tinted to match each tier's spotlight-stage glow so coin + backdrop
+// read as one dramatic composition. Set on the shared rim light per tile in the
+// frame loop. Cool blue / warm amber / icy cyan; locked stays a dim cool steel.
+const TIER_RIM_LIGHT: Record<BadgeTier, number> = {
+  silver: 0x9bd2ff,
+  gold: 0xffce7a,
+  diamond: 0x8fe6ff,
+}
+const LOCKED_RIM_LIGHT = 0x6f8bb0
+
+// Diamond is a dielectric gem, not a metal: near-zero metalness, mirror-smooth,
+// strong environment reflections, and iridescence for the rainbow gem shimmer.
+// Shared by both the plain coin material and the engraved face material so the
+// trophy tier looks identical whether or not its emblem heightfield has loaded.
+const DIAMOND_GEM = {
+  color: TIER_COLOR.diamond,
+  metalness: 0.1,
+  roughness: TIER_ROUGHNESS.diamond,
+  clearcoat: 1,
+  clearcoatRoughness: 0.03,
+  envMapIntensity: 3,
+  ior: 2.4,
+  reflectivity: 1,
+  iridescence: 1,
+  iridescenceIOR: 1.8,
+  iridescenceThicknessRange: [120, 480] as [number, number],
+  emissive: new THREE.Color(TIER_EMISSIVE.diamond),
+  emissiveIntensity: 0.18,
+} as const
 
 function clamp(x: number, lo: number, hi: number): number {
   return Math.min(Math.max(x, lo), hi)
@@ -88,6 +142,11 @@ const RIM_WIDTH = 0.08
 const FIELD_RECESS = 0.05
 const FIELD_R = 0.72 // emblem disc radius (sits inside the flat field)
 
+// Reeding: the fine vertical ridges milled into a real coin's edge. 60 ridges,
+// shallow, resolved by ~6 lathe segments each (hence the high segment count).
+const REED_COUNT = 60
+const REED_DEPTH = 0.011
+
 function makeCoinGeometry(): THREE.BufferGeometry {
   const innerRimR = COIN_R - RIM_WIDTH
   const fieldTopY = COIN_HALF_DEPTH - FIELD_RECESS
@@ -100,9 +159,28 @@ function makeCoinGeometry(): THREE.BufferGeometry {
     new THREE.Vector2(innerRimR - 0.03, fieldTopY),
     new THREE.Vector2(0, fieldTopY),
   ]
-  const geo = new THREE.LatheGeometry(profile, 96)
+  const geo = new THREE.LatheGeometry(profile, 360)
   // Stand the coin up so its faces point ±Z (front field toward the camera).
   geo.rotateX(Math.PI / 2)
+
+  // Mill the edge: the outer cylindrical wall is the only ring at radius COIN_R
+  // (both the front-rim and back-face outer vertices). Pull those vertices in by
+  // a cosine of their angle so the wall gains evenly-spaced vertical flutes; the
+  // re-derived vertex normals turn the flutes into catch-the-light facets.
+  const pos = geo.attributes.position as THREE.BufferAttribute
+  const v = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i)
+    const rad = Math.hypot(v.x, v.y)
+    if (rad > COIN_R - 1e-3) {
+      const ang = Math.atan2(v.y, v.x)
+      const ripple = (Math.cos(ang * REED_COUNT) * 0.5 + 0.5) * REED_DEPTH
+      const newRad = rad - ripple
+      pos.setXY(i, Math.cos(ang) * newRad, Math.sin(ang) * newRad)
+    }
+  }
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
   return geo
 }
 
@@ -131,6 +209,85 @@ function makeRibbonTailGeometry(): THREE.BufferGeometry {
   const h = geo.boundingBox ? geo.boundingBox.max.y - geo.boundingBox.min.y : 0.8
   geo.translate(0, -h / 2, 0)
   return geo
+}
+
+// ── Coin framing: laurels + crest stars ────────────────────────────────────────
+// The signature CS:GO operation-coin motif: two laurel branches arcing up the
+// flanks and a crest of three stars across the top. Drawn in greyscale into the
+// emblem heightfield so they're struck into the metal at a lower relief than the
+// emblem itself (mid-grey 128 = field; brighter = more raised).
+
+function drawLeaf(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, len: number, wid: number): void {
+  ctx.save()
+  ctx.translate(x, y)
+  ctx.rotate(angle)
+  ctx.beginPath()
+  ctx.ellipse(0, 0, len, wid, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+// Canvas angles are y-down: 90°=bottom, 180°=left, 270°=top, 0°=right. Each
+// branch runs from near the bottom up one flank toward the crest; leaves lie
+// tangent to the arc so they feather along the stem.
+function drawLaurels(ctx: CanvasRenderingContext2D, size: number): void {
+  const c = size / 2
+  const R = size * 0.345
+  const leafLen = size * 0.05
+  const leafWid = size * 0.021
+  const N = 7
+  ctx.fillStyle = '#bdbdbd'
+  ctx.strokeStyle = '#a8a8a8'
+  ctx.lineWidth = size * 0.012
+  for (const dir of [1, -1] as const) {
+    // dir +1 = left branch (110°→225°), dir −1 = right branch (70°→−45°).
+    ctx.beginPath()
+    for (let k = 0; k < N; k++) {
+      const f = k / (N - 1)
+      const a = (dir === 1 ? 110 + f * 115 : 70 - f * 115) * (Math.PI / 180)
+      const x = c + Math.cos(a) * R
+      const y = c + Math.sin(a) * R
+      if (k === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.stroke()
+    for (let k = 0; k < N; k++) {
+      const f = k / (N - 1)
+      const a = (dir === 1 ? 110 + f * 115 : 70 - f * 115) * (Math.PI / 180)
+      const x = c + Math.cos(a) * R
+      const y = c + Math.sin(a) * R
+      drawLeaf(ctx, x, y, a + Math.PI / 2, leafLen, leafWid)
+    }
+  }
+}
+
+function drawStar(ctx: CanvasRenderingContext2D, cx: number, cy: number, outer: number, inner: number): void {
+  ctx.beginPath()
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outer : inner
+    const a = -Math.PI / 2 + (i * Math.PI) / 5
+    const x = cx + Math.cos(a) * r
+    const y = cy + Math.sin(a) * r
+    if (i === 0) ctx.moveTo(x, y)
+    else ctx.lineTo(x, y)
+  }
+  ctx.closePath()
+  ctx.fill()
+}
+
+function drawCrestStars(ctx: CanvasRenderingContext2D, size: number): void {
+  const c = size / 2
+  const R = size * 0.36
+  ctx.fillStyle = '#dcdcdc'
+  const crest: Array<[number, number]> = [
+    [252, size * 0.026],
+    [270, size * 0.038],
+    [288, size * 0.026],
+  ]
+  for (const [deg, outer] of crest) {
+    const a = deg * (Math.PI / 180)
+    drawStar(ctx, c + Math.cos(a) * R, c + Math.sin(a) * R, outer, outer * 0.45)
+  }
 }
 
 // ── Emblem heightfield (engraving) ─────────────────────────────────────────────
@@ -188,8 +345,11 @@ function makeEmblemHeightfield(
           ctx.beginPath()
           ctx.arc(size / 2, size / 2, size * 0.42, 0, Math.PI * 2)
           ctx.stroke()
-          // The emblem, raised (white) and centered.
-          const pad = size * 0.26
+          // Coin framing struck at low relief: laurels up the flanks, stars at the crest.
+          drawLaurels(ctx, size)
+          drawCrestStars(ctx, size)
+          // The emblem, raised (white) and centered within the laurel frame.
+          const pad = size * 0.29
           ctx.drawImage(img, pad, pad, size - pad * 2, size - pad * 2)
           const tex = new THREE.CanvasTexture(c)
           // Bump maps are data, not colour — keep them linear.
@@ -212,18 +372,55 @@ function makeEmblemHeightfield(
   })
 }
 
+// ── Metal realism: a Fresnel grazing-angle sheen (onBeforeCompile) ─────────────
+// PBR metalness alone gives a flat-looking coin under a soft studio env: the rim
+// goes as dark as the face. Real polished metal does the opposite — it brightens
+// toward its specular colour at glancing angles where it grazes the brighter
+// parts of the surroundings. We inject that Fresnel term into the stock
+// MeshPhysicalMaterial shader (right after <emissivemap_fragment>, where `normal`
+// and `vViewPosition` are both in scope) and add it to the emissive radiance, so
+// the coin gains a lit, rounded edge instead of fading out. Kept subtle so it
+// reads as caught light, not a neon glow. Uniforms are static (no per-frame
+// update); instances with identical injected source share one shader program.
+function enhanceMetalMaterial(
+  mat: THREE.MeshPhysicalMaterial,
+  rimColor: number,
+  rimStrength: number,
+  fresnelPower: number,
+): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uRimColor = { value: new THREE.Color(rimColor) }
+    shader.uniforms.uRimStrength = { value: rimStrength }
+    shader.uniforms.uFresnelPower = { value: fresnelPower }
+    shader.fragmentShader =
+      'uniform vec3 uRimColor;\nuniform float uRimStrength;\nuniform float uFresnelPower;\n' +
+      shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        {
+          vec3 vDir = normalize( vViewPosition );
+          float fres = pow( 1.0 - clamp( dot( vDir, normal ), 0.0, 1.0 ), uFresnelPower );
+          totalEmissiveRadiance += uRimColor * ( fres * uRimStrength );
+        }`,
+      )
+  }
+}
+
 function makeTierMaterial(tier: BadgeTier): THREE.MeshPhysicalMaterial {
-  return new THREE.MeshPhysicalMaterial({
+  if (tier === 'diamond') return new THREE.MeshPhysicalMaterial({ ...DIAMOND_GEM })
+  const mat = new THREE.MeshPhysicalMaterial({
     color: TIER_COLOR[tier],
     metalness: 1,
     roughness: TIER_ROUGHNESS[tier],
     clearcoat: 1,
     clearcoatRoughness: 0.15,
-    envMapIntensity: 1.5,
+    envMapIntensity: 2,
     anisotropy: 0.25,
     emissive: new THREE.Color(TIER_EMISSIVE[tier]),
     emissiveIntensity: 0.1,
   })
+  enhanceMetalMaterial(mat, TIER_RIM[tier], 0.4, 3.5)
+  return mat
 }
 
 export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedalSceneController {
@@ -249,13 +446,15 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
   camera.position.set(0, 0, 3)
   camera.lookAt(0, 0, 0)
 
-  // The environment supplies most of the fill; a low ambient plus a warm key
-  // and cool rim keep a directional highlight sweeping across the metal.
-  scene.add(new THREE.AmbientLight(0xffffff, 0.25))
-  const key = new THREE.DirectionalLight(0xfff2d6, 1.4)
-  key.position.set(1.5, 2.2, 3)
+  // Dramatic / premium rig: low ambient so the coin falls off into the dark
+  // spotlight stage, a strong high-raked warm key for a glossy highlight sweep,
+  // and a punchy rim re-tinted per tier each frame (see TIER_RIM_LIGHT) so the
+  // coin's edge light matches the backdrop glow.
+  scene.add(new THREE.AmbientLight(0xffffff, 0.14))
+  const key = new THREE.DirectionalLight(0xfff2d6, 2.1)
+  key.position.set(1.6, 2.8, 3)
   scene.add(key)
-  const rim = new THREE.DirectionalLight(0x9bd2ff, 0.4)
+  const rim = new THREE.DirectionalLight(0x9bd2ff, 0.9)
   rim.position.set(-2, -1, 2)
   scene.add(rim)
 
@@ -265,24 +464,29 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
   // Tier metals + a dim matte "un-struck" material for locked badges, created
   // once and swapped per tile.
   const tierMaterials: Record<BadgeTier, THREE.MeshPhysicalMaterial> = {
-    bronze: makeTierMaterial('bronze'),
     silver: makeTierMaterial('silver'),
     gold: makeTierMaterial('gold'),
+    diamond: makeTierMaterial('diamond'),
   }
+  // Locked coin: dark blued steel with a faint cool Fresnel rim. Still takes the
+  // struck emblem (built below into lockedFaceMaterials) so a locked badge looks
+  // like an un-awarded medallion — a preview of the prize — not a blank disc.
   const lockedMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x3b3f45,
-    metalness: 0.7,
-    roughness: 0.85,
-    clearcoat: 0.2,
-    envMapIntensity: 0.5,
+    color: LOCKED_COLOR,
+    metalness: 0.9,
+    roughness: 0.5,
+    clearcoat: 0.6,
+    clearcoatRoughness: 0.25,
+    envMapIntensity: 0.9,
   })
+  enhanceMetalMaterial(lockedMaterial, LOCKED_RIM, 0.45, 3)
 
   // Ribbon: two angled tails behind the coin, tinted per tier each frame.
   const ribbonGeo = makeRibbonTailGeometry()
   const ribbonMaterials: Record<BadgeTier, THREE.MeshStandardMaterial> = {
-    bronze: new THREE.MeshStandardMaterial({ color: RIBBON_COLOR.bronze, roughness: 0.75, metalness: 0.1 }),
     silver: new THREE.MeshStandardMaterial({ color: RIBBON_COLOR.silver, roughness: 0.75, metalness: 0.1 }),
     gold: new THREE.MeshStandardMaterial({ color: RIBBON_COLOR.gold, roughness: 0.75, metalness: 0.1 }),
+    diamond: new THREE.MeshStandardMaterial({ color: RIBBON_COLOR.diamond, roughness: 0.55, metalness: 0.2 }),
   }
   const ribbonGroup = new THREE.Group()
   const ribbonLeft = new THREE.Mesh(ribbonGeo, ribbonMaterials.gold)
@@ -298,9 +502,9 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
   // fixed; material swapped per tile), a front emblem face (bump map swapped per
   // tile), and the ribbon behind it.
   const medal = new THREE.Group()
-  const coinMesh = new THREE.Mesh(coinGeo, tierMaterials.bronze)
+  const coinMesh = new THREE.Mesh(coinGeo, tierMaterials.silver)
   const emblemGeometry = new THREE.CircleGeometry(FIELD_R, 64)
-  const emblemMesh = new THREE.Mesh(emblemGeometry, tierMaterials.bronze)
+  const emblemMesh = new THREE.Mesh(emblemGeometry, tierMaterials.silver)
   emblemMesh.position.z = FIELD_Z + 0.002
   medal.add(ribbonGroup)
   medal.add(coinMesh)
@@ -311,31 +515,57 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
   // absent until/unless the heightfield resolves. When present the field shows
   // the struck emblem; otherwise the plain recessed metal field.
   const faceMaterials = new Map<string, THREE.MeshPhysicalMaterial>()
+  // Locked badges get their own engraved face: the same struck emblem, but in the
+  // dark blued-steel finish, so the prize is previewed rather than hidden.
+  const lockedFaceMaterials = new Map<string, THREE.MeshPhysicalMaterial>()
   const faceTextures: THREE.CanvasTexture[] = []
   let disposed = false
   const isDisposed = { current: false }
   const pendingUrls = new Set<string>()
 
   for (const tile of tiles) {
-    if (!tile.earned) continue // locked badges are blank — no emblem
     void makeEmblemHeightfield(tile.badgeId, pendingUrls, isDisposed).then((tex) => {
       if (disposed || !tex) {
         tex?.dispose()
         return
       }
       faceTextures.push(tex)
-      const fm = new THREE.MeshPhysicalMaterial({
-        color: TIER_COLOR[tile.tier],
-        metalness: 1,
-        roughness: TIER_ROUGHNESS[tile.tier],
-        clearcoat: 1,
-        clearcoatRoughness: 0.15,
-        envMapIntensity: 1.5,
-        bumpMap: tex,
-        bumpScale: 6,
-        emissive: new THREE.Color(TIER_EMISSIVE[tile.tier]),
-        emissiveIntensity: 0.1,
-      })
+      if (!tile.earned) {
+        // Struck emblem in the dark locked finish (matches lockedMaterial).
+        const lm = new THREE.MeshPhysicalMaterial({
+          color: LOCKED_COLOR,
+          metalness: 0.9,
+          roughness: 0.5,
+          clearcoat: 0.6,
+          clearcoatRoughness: 0.25,
+          envMapIntensity: 0.9,
+          bumpMap: tex,
+          bumpScale: 6,
+        })
+        enhanceMetalMaterial(lm, LOCKED_RIM, 0.45, 3)
+        lockedFaceMaterials.set(tile.badgeId, lm)
+        return
+      }
+      // The engraved face shares each tier's finish (gem for diamond, metal
+      // otherwise) and adds the badge's emblem+framing heightfield as a bump.
+      let fm: THREE.MeshPhysicalMaterial
+      if (tile.tier === 'diamond') {
+        fm = new THREE.MeshPhysicalMaterial({ ...DIAMOND_GEM, bumpMap: tex, bumpScale: 6 })
+      } else {
+        fm = new THREE.MeshPhysicalMaterial({
+          color: TIER_COLOR[tile.tier],
+          metalness: 1,
+          roughness: TIER_ROUGHNESS[tile.tier],
+          clearcoat: 1,
+          clearcoatRoughness: 0.15,
+          envMapIntensity: 2,
+          bumpMap: tex,
+          bumpScale: 6,
+          emissive: new THREE.Color(TIER_EMISSIVE[tile.tier]),
+          emissiveIntensity: 0.1,
+        })
+        enhanceMetalMaterial(fm, TIER_RIM[tile.tier], 0.4, 3.5)
+      }
       faceMaterials.set(tile.badgeId, fm)
     })
   }
@@ -455,14 +685,21 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
       camera.bottom = -1
       camera.updateProjectionMatrix()
 
-      // Tier metal (earned) or dim matte blank (locked); emblem only when earned.
+      // Tier metal (earned) or dark blued steel (locked). The ribbon is the
+      // earned-only flourish; locked still shows the struck emblem in relief as
+      // a preview of the prize.
       coinMesh.material = tile.earned ? tierMaterials[tile.tier] : lockedMaterial
+      // Tint the rim light to this tile's tier so its edge light matches the
+      // per-tier spotlight-stage glow (locked stays a dim cool steel).
+      rim.color.set(tile.earned ? TIER_RIM_LIGHT[tile.tier] : LOCKED_RIM_LIGHT)
       ribbonGroup.visible = tile.earned
       if (tile.earned) {
         ribbonLeft.material = ribbonMaterials[tile.tier]
         ribbonRight.material = ribbonMaterials[tile.tier]
       }
-      const faceMat = tile.earned ? faceMaterials.get(tile.badgeId) : undefined
+      const faceMat = tile.earned
+        ? faceMaterials.get(tile.badgeId)
+        : lockedFaceMaterials.get(tile.badgeId)
       if (faceMat) {
         emblemMesh.material = faceMat
         emblemMesh.visible = true
@@ -474,7 +711,8 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
         medal.rotation.y = dragRotY
         medal.rotation.x = dragRotX
         medal.position.y = Math.sin(t * 1.1) * 0.02
-        medal.scale.setScalar(1)
+        // The zoomed detail view shows a single medal — fill more of the frame.
+        medal.scale.setScalar(1.12)
       } else {
         // Idle shine sweep: a gentle per-tile-phase sway drifts the environment
         // highlight slowly across the metal so the grid feels alive.
@@ -532,6 +770,7 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
       for (const tier of Object.keys(tierMaterials) as BadgeTier[]) tierMaterials[tier].dispose()
       for (const tier of Object.keys(ribbonMaterials) as BadgeTier[]) ribbonMaterials[tier].dispose()
       for (const fm of faceMaterials.values()) fm.dispose()
+      for (const fm of lockedFaceMaterials.values()) fm.dispose()
       for (const tex of faceTextures) tex.dispose()
       renderer.forceContextLoss?.()
       renderer.dispose()

@@ -223,7 +223,9 @@ export function BadgeDetailCard({
           className={[
             'flex justify-center items-center',
             'pt-8 pb-4',
-            // Tier hook: Task 8's CSS can style the container by tier.
+            // Spotlight stage: dark, per-tier-tinted radial backdrop behind the
+            // coin (replaces the flat card panel). Tier hook drives the glow tint.
+            'badge-stage',
             `badge-tier--${meta.tier}`,
           ].join(' ')}
           data-tier={meta.tier}
