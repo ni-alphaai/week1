@@ -4,7 +4,6 @@ import type { BadgeTier } from '../content/badges'
 import { emblemFor } from './badgeEmblems'
 import { setupRenderer, makeStudioEnvironment } from './threeEnv'
 import { medalPixelRatio } from '../lib/webgl'
-import { enamelColorFor } from '../content/badgeEnamel'
 
 // This is the ONLY module in the medal-grid feature that imports three.js. It
 // is reached exclusively through the dynamic import() in BadgeMedalGrid, so
@@ -71,7 +70,7 @@ const TIER_EMISSIVE: Record<BadgeTier, number> = {
 const TIER_ROUGHNESS: Record<BadgeTier, number> = {
   silver: 0.22,
   gold: 0.18,
-  diamond: 0.05,
+  diamond: 0.12,
 }
 
 // Deeper, matte fabric colours for the ribbon, distinct from the bright coin.
@@ -418,113 +417,14 @@ function makeTierMaterial(tier: BadgeTier): THREE.MeshPhysicalMaterial {
     metalness: 1,
     roughness: TIER_ROUGHNESS[tier],
     clearcoat: 1,
-    clearcoatRoughness: 0.15,
-    envMapIntensity: 2,
+    clearcoatRoughness: 0.1,
+    envMapIntensity: 1.2,
     anisotropy: 0.25,
     emissive: new THREE.Color(TIER_EMISSIVE[tier]),
     emissiveIntensity: 0.1,
   })
   enhanceMetalMaterial(mat, TIER_RIM[tier], 0.4, 3.5)
   return mat
-}
-
-// ── Enamel center disc (color + packed ORM maps) ───────────────────────────────
-// CS2 operation-coin language: a glossy colored enamel disc sits behind the
-// emblem, ringed by metal; the laurels/crest-stars stay out on the metal. We bake
-// this into texture maps on the emblem FACE material (not the coin body):
-//   • map (sRGB)      — enamel color inside the disc, tier metal albedo outside
-//   • ORM (linear)    — packed: G = roughness, B = metalness (three reads .g/.b);
-//                       assigned to BOTH roughnessMap and metalnessMap. Values are
-//                       absolute, so the face material sets metalness=roughness=1.
-// The existing grayscale bumpMap is unchanged and still strikes the emblem +
-// framing in relief; here we only add color/finish.
-
-// Enamel disc radius as a fraction of the emblem-face radius. The emblem (drawn
-// to ~0.42 of the face in makeEmblemHeightfield) sits inside it; the laurels and
-// crest stars (~0.69+) stay outside on the metal.
-const ENAMEL_R_FRAC = 0.55
-const ENAMEL_ROUGHNESS = 0.28
-
-interface TierSurface {
-  color: number
-  metalness: number
-  roughness: number
-}
-
-// Absolute PBR values for the metal (non-enamel) zone of each tier's face. For
-// diamond these match DIAMOND_GEM's gem values so the holo gem is preserved
-// outside the enamel disc.
-function tierSurface(tier: BadgeTier): TierSurface {
-  if (tier === 'diamond') return { color: TIER_COLOR.diamond, metalness: 0.1, roughness: TIER_ROUGHNESS.diamond }
-  return { color: TIER_COLOR[tier], metalness: 1, roughness: TIER_ROUGHNESS[tier] }
-}
-
-interface EnamelMaps {
-  color: THREE.CanvasTexture
-  orm: THREE.CanvasTexture
-}
-
-// Build the color + ORM maps for one (tier, enamelColor). Synchronous (no image
-// load) — purely radial. Caller owns disposal of both returned textures.
-function makeEnamelMaps(tier: BadgeTier, enamelHex: string): EnamelMaps {
-  const size = 256
-  const c = size / 2
-  const rDisc = c * ENAMEL_R_FRAC // = 70.4px for size 256
-  const surf = tierSurface(tier)
-  const metalHex = `#${new THREE.Color(surf.color).getHexString()}`
-  const ringWidth = size * 0.02
-
-  // colour map: tier metal albedo, with the enamel disc + a thin metal ring.
-  const cc = document.createElement('canvas')
-  cc.width = size
-  cc.height = size
-  const cx = cc.getContext('2d')
-  // orm map: packed roughness (G) + metalness (B).
-  const oc = document.createElement('canvas')
-  oc.width = size
-  oc.height = size
-  const ox = oc.getContext('2d')
-  if (!cx || !ox) {
-    // No 2D context — return transparent textures; faces fall back to plain look.
-    return { color: new THREE.CanvasTexture(cc), orm: new THREE.CanvasTexture(oc) }
-  }
-
-  const metalRgb = `rgb(0, ${Math.round(surf.roughness * 255)}, ${Math.round(surf.metalness * 255)})`
-  const enamelRgb = `rgb(0, ${Math.round(ENAMEL_ROUGHNESS * 255)}, 0)` // metalness 0 inside disc
-
-  // Metal everywhere.
-  cx.fillStyle = metalHex
-  cx.fillRect(0, 0, size, size)
-  ox.fillStyle = metalRgb
-  ox.fillRect(0, 0, size, size)
-  // Enamel disc.
-  cx.fillStyle = enamelHex
-  cx.beginPath()
-  cx.arc(c, c, rDisc, 0, Math.PI * 2)
-  cx.fill()
-  ox.fillStyle = enamelRgb
-  ox.beginPath()
-  ox.arc(c, c, rDisc, 0, Math.PI * 2)
-  ox.fill()
-  // Thin metal ring border around the enamel disc (both maps).
-  cx.strokeStyle = metalHex
-  cx.lineWidth = ringWidth
-  cx.beginPath()
-  cx.arc(c, c, rDisc, 0, Math.PI * 2)
-  cx.stroke()
-  ox.strokeStyle = metalRgb
-  ox.lineWidth = ringWidth
-  ox.beginPath()
-  ox.arc(c, c, rDisc, 0, Math.PI * 2)
-  ox.stroke()
-
-  const color = new THREE.CanvasTexture(cc)
-  color.colorSpace = THREE.SRGBColorSpace
-  color.anisotropy = 4
-  const orm = new THREE.CanvasTexture(oc)
-  orm.colorSpace = THREE.NoColorSpace
-  orm.anisotropy = 4
-  return { color, orm }
 }
 
 export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedalSceneController {
@@ -541,6 +441,11 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
   // edges + no specular crawl (see medalPixelRatio).
   renderer.setPixelRatio(medalPixelRatio(window.devicePixelRatio, draggable))
   setupRenderer(renderer)
+  // Trim exposure a touch below the shared default (1.1): the neutral silver and
+  // the icy diamond have no warm base color to fall back on, so the bright studio
+  // env clips them to white at 1.1. Set locally (not in setupRenderer) so the
+  // gold-and-wood treasure-chest scene keeps its brighter default.
+  renderer.toneMappingExposure = 1.0
   renderer.setScissorTest(true)
 
   const scene = new THREE.Scene()
@@ -557,7 +462,7 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
   // and a punchy rim re-tinted per tier each frame (see TIER_RIM_LIGHT) so the
   // coin's edge light matches the backdrop glow.
   scene.add(new THREE.AmbientLight(0xffffff, 0.14))
-  const key = new THREE.DirectionalLight(0xfff2d6, 2.1)
+  const key = new THREE.DirectionalLight(0xfff2d6, 1.6)
   key.position.set(1.6, 2.8, 3)
   scene.add(key)
   const rim = new THREE.DirectionalLight(0x9bd2ff, 0.9)
@@ -625,8 +530,6 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
   // dark blued-steel finish, so the prize is previewed rather than hidden.
   const lockedFaceMaterials = new Map<string, THREE.MeshPhysicalMaterial>()
   const faceTextures: THREE.CanvasTexture[] = []
-  // Enamel color + ORM maps for earned faces; disposed in dispose().
-  const enamelTextures: THREE.CanvasTexture[] = []
   let disposed = false
   const isDisposed = { current: false }
   const pendingUrls = new Set<string>()
@@ -654,37 +557,21 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
         lockedFaceMaterials.set(tile.badgeId, lm)
         return
       }
-      // The engraved face shares each tier's finish (gem for diamond, metal
-      // otherwise), strikes the emblem+framing via the bump heightfield, and
-      // carries the enamel center disc via color + packed-ORM maps. Albedo and
-      // finish are driven entirely by the maps, so the material's base color is
-      // white and metalness/roughness are 1 (the maps hold the absolute values).
-      const enamel = makeEnamelMaps(tile.tier, enamelColorFor(tile.badgeId))
-      enamelTextures.push(enamel.color, enamel.orm)
+      // The engraved face shares each tier's finish — the holographic gem for
+      // diamond, struck metal otherwise — and strikes the emblem + framing via
+      // the bump heightfield. No color/ORM maps: the metal tiers are clean struck
+      // metal and the diamond is a full-face holo gem (DIAMOND_GEM's iridescence).
       let fm: THREE.MeshPhysicalMaterial
       if (tile.tier === 'diamond') {
-        fm = new THREE.MeshPhysicalMaterial({
-          ...DIAMOND_GEM,
-          color: 0xffffff,
-          metalness: 1,
-          roughness: 1,
-          map: enamel.color,
-          metalnessMap: enamel.orm,
-          roughnessMap: enamel.orm,
-          bumpMap: tex,
-          bumpScale: 6,
-        })
+        fm = new THREE.MeshPhysicalMaterial({ ...DIAMOND_GEM, bumpMap: tex, bumpScale: 6 })
       } else {
         fm = new THREE.MeshPhysicalMaterial({
-          color: 0xffffff,
+          color: TIER_COLOR[tile.tier],
           metalness: 1,
-          roughness: 1,
+          roughness: TIER_ROUGHNESS[tile.tier],
           clearcoat: 1,
-          clearcoatRoughness: 0.15,
-          envMapIntensity: 2,
-          map: enamel.color,
-          metalnessMap: enamel.orm,
-          roughnessMap: enamel.orm,
+          clearcoatRoughness: 0.1,
+          envMapIntensity: 1.2,
           bumpMap: tex,
           bumpScale: 6,
           emissive: new THREE.Color(TIER_EMISSIVE[tile.tier]),
@@ -898,7 +785,6 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
       for (const fm of faceMaterials.values()) fm.dispose()
       for (const fm of lockedFaceMaterials.values()) fm.dispose()
       for (const tex of faceTextures) tex.dispose()
-      for (const tex of enamelTextures) tex.dispose()
       renderer.forceContextLoss?.()
       renderer.dispose()
     },
