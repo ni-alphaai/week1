@@ -3,7 +3,7 @@ import type { Instruction, Lesson } from '../types'
 import { emptyLearnerState } from '../storage/types'
 import type { LearnerState } from '../storage/types'
 import type { AwardCtx } from './badges'
-import { BADGES, BADGE_LABELS, evaluateBadges } from './badges'
+import { BADGES, BADGE_LABELS, evaluateBadges, tierForRarity, badgeMeta } from './badges'
 
 const lesson: Lesson = {
   id: 'lesson-x',
@@ -188,5 +188,71 @@ describe('evaluateBadges — idempotence', () => {
       }),
     )
     expect(ids).toEqual([])
+  })
+})
+
+describe('tierForRarity', () => {
+  it('maps common → bronze', () => {
+    expect(tierForRarity('common')).toBe('bronze')
+  })
+  it('maps uncommon → silver', () => {
+    expect(tierForRarity('uncommon')).toBe('silver')
+  })
+  it('maps rare → gold', () => {
+    expect(tierForRarity('rare')).toBe('gold')
+  })
+})
+
+describe('BADGES rarity coverage', () => {
+  it('every BadgeDef has a non-undefined rarity', () => {
+    for (const b of BADGES) {
+      expect((b as { rarity?: string }).rarity).toBeDefined()
+    }
+  })
+})
+
+describe('badgeMeta — achievement badges', () => {
+  it('returns rare/gold for optimal-solver', () => {
+    const meta = badgeMeta('optimal-solver')
+    expect(meta.rarity).toBe('rare')
+    expect(meta.tier).toBe('gold')
+    expect(meta.title).toBe('Optimal Solver')
+  })
+
+  it('returns common/bronze for first-loop', () => {
+    const meta = badgeMeta('first-loop')
+    expect(meta.rarity).toBe('common')
+    expect(meta.tier).toBe('bronze')
+  })
+
+  it('returns uncommon/silver for first-while', () => {
+    const meta = badgeMeta('first-while')
+    expect(meta.rarity).toBe('uncommon')
+    expect(meta.tier).toBe('silver')
+  })
+})
+
+describe('badgeMeta — lesson-award badges', () => {
+  it('returns rare/gold for lesson6 capstone award (algorithm-ace)', () => {
+    const meta = badgeMeta('algorithm-ace')
+    expect(meta.rarity).toBe('rare')
+    expect(meta.tier).toBe('gold')
+    expect(meta.title).toBe('Algorithm Ace')
+  })
+
+  it('returns uncommon/silver for lesson5 award (combo-coder)', () => {
+    const meta = badgeMeta('combo-coder')
+    expect(meta.rarity).toBe('uncommon')
+    expect(meta.tier).toBe('silver')
+  })
+})
+
+describe('badgeMeta — unknown id fallback', () => {
+  it('returns safe fallback for an unknown id', () => {
+    const meta = badgeMeta('totally-unknown-badge')
+    expect(meta.title).toBe('totally-unknown-badge')
+    expect(meta.blurb).toBe('')
+    expect(meta.rarity).toBe('common')
+    expect(meta.tier).toBe('bronze')
   })
 })

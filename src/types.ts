@@ -312,11 +312,15 @@ export interface BeatStep {
 
 export type LessonStep = ConceptStep | SequenceStep | ConditionalStep | BeatStep
 
+// Rarity tier for badges (achievement and lesson-award alike).
+export type BadgeRarity = 'common' | 'uncommon' | 'rare'
+
 // An achievement awarded when a lesson is completed for the first time.
 export interface Badge {
   id: string
   title: string
   blurb: string
+  rarity?: BadgeRarity
 }
 
 export interface Lesson {

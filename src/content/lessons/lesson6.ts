@@ -61,6 +61,7 @@ export const lesson6: Lesson = {
     id: 'algorithm-ace',
     title: 'Algorithm Ace',
     blurb: 'Cracked FizzBuzz with nested Ifs, multiplied steps with nested loops, and ran a real binary search — true algorithm thinking.',
+    rarity: 'rare' as const,
   },
   steps: [
     {

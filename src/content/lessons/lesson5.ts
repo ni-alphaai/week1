@@ -54,6 +54,7 @@ export const lesson5: Lesson = {
     id: 'combo-coder',
     title: 'Combo Coder',
     blurb: 'Mixed Repeat, While, and If / else together across five tough routes.',
+    rarity: 'uncommon' as const,
   },
   steps: [
     {

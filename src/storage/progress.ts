@@ -48,6 +48,9 @@ type LegacyStepStat = {
 type LegacyLessonProgress = {
   openedAt?: number | null
 }
+type LegacyLearnerState = {
+  badgeAcquiredAt?: Record<string, number>
+}
 
 function localDateString(date: Date): string {
   const year = date.getFullYear()
@@ -96,6 +99,8 @@ function markStepCompleteInPlace(state: LearnerState, lesson: Lesson, stepId: st
     }
     if (lesson.award && !state.badges.includes(lesson.award.id)) {
       state.badges.push(lesson.award.id)
+      state.badgeAcquiredAt ??= {}
+      state.badgeAcquiredAt[lesson.award.id] = progress.completedAt ?? Date.now()
     }
   }
 }
@@ -303,6 +308,9 @@ export function migrate(state: LearnerState): LearnerState {
       genServed: 0,
       genAbstained: 0,
     }
+  }
+  if (!(next as LegacyLearnerState).badgeAcquiredAt) {
+    next.badgeAcquiredAt = {}
   }
   return next
 }

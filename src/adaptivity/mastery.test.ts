@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { emptyLearnerState } from '../storage/types'
 import type { SkillStat } from '../storage/types'
 import type { Box } from './leitner'
-import { belowSkilled, decayedSuccessRate, dueSkills, lessonMastery, lessonSuccessRate } from './mastery'
+import { belowSkilled, belowSkilledSkills, decayedSuccessRate, dueSkills, lessonMastery, lessonReviewQueue, lessonSuccessRate } from './mastery'
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = 100 * DAY
@@ -190,5 +190,77 @@ describe('belowSkilled (Soft Gate predicate)', () => {
 
   it('is false for an unknown lesson id (no skillIds)', () => {
     expect(belowSkilled(stateAt(80, 2), 'nonexistent-lesson')).toBe(false)
+  })
+})
+
+// lesson-1-sequencing-cargo has skillIds ['sequencing', 'planning'].
+// stateAt() from above sets both skills to the same score/attempts.
+// For mixed-skill tests we build state manually.
+
+describe('belowSkilledSkills', () => {
+  it('returns [] for an unknown lesson id', () => {
+    expect(belowSkilledSkills(stateAt(80, 2), 'nonexistent-lesson')).toEqual([])
+  })
+
+  it('returns [] when all skills are Skilled or above', () => {
+    // 80% / 3 attempts = exactly Skilled
+    expect(belowSkilledSkills(stateAt(80, 3), 'lesson-1-sequencing-cargo')).toEqual([])
+  })
+
+  it('returns [] when all skills are Master', () => {
+    // 90% / 4 attempts = Master
+    expect(belowSkilledSkills(stateAt(90, 4), 'lesson-1-sequencing-cargo')).toEqual([])
+  })
+
+  it('returns only the weak skill id when one is below Skilled and one is not', () => {
+    // sequencing: Skilled (80%/3), planning: Novice (0 attempts)
+    const state = emptyLearnerState('l1')
+    state.skillStats['sequencing'] = stat({ attempts: 3, correct: 3 }) // Skilled
+    // planning has no stat entry → masteryTier returns 'Novice'
+    expect(belowSkilledSkills(state, 'lesson-1-sequencing-cargo')).toEqual(['planning'])
+  })
+
+  it('preserves lesson skillIds order', () => {
+    // lesson-1-sequencing-cargo skillIds order is ['sequencing', 'planning']
+    // Both Novice → both returned in that order
+    const state = emptyLearnerState('l1')
+    expect(belowSkilledSkills(state, 'lesson-1-sequencing-cargo')).toEqual(['sequencing', 'planning'])
+  })
+})
+
+describe('lessonReviewQueue', () => {
+  it('returns [] when there are no below-Skilled skills', () => {
+    // 80%/3 = Skilled for both skills
+    expect(lessonReviewQueue(stateAt(80, 3), 'lesson-1-sequencing-cargo')).toEqual([])
+  })
+
+  it('repeats each weak skill perSkill times, grouped by skill (default perSkill=3)', () => {
+    // Both sequencing and planning are Novice (no attempts)
+    const state = emptyLearnerState('l1')
+    expect(lessonReviewQueue(state, 'lesson-1-sequencing-cargo')).toEqual([
+      'sequencing', 'sequencing', 'sequencing',
+      'planning', 'planning', 'planning',
+    ])
+  })
+
+  it('respects a custom perSkill value', () => {
+    const state = emptyLearnerState('l1')
+    expect(lessonReviewQueue(state, 'lesson-1-sequencing-cargo', 2)).toEqual([
+      'sequencing', 'sequencing',
+      'planning', 'planning',
+    ])
+  })
+
+  it('only repeats weak skills, skipping strong ones', () => {
+    // sequencing: Skilled, planning: Novice
+    const state = emptyLearnerState('l1')
+    state.skillStats['sequencing'] = stat({ attempts: 3, correct: 3 }) // Skilled
+    expect(lessonReviewQueue(state, 'lesson-1-sequencing-cargo', 3)).toEqual([
+      'planning', 'planning', 'planning',
+    ])
+  })
+
+  it('returns [] for an unknown lesson id', () => {
+    expect(lessonReviewQueue(stateAt(80, 2), 'nonexistent-lesson')).toEqual([])
   })
 })

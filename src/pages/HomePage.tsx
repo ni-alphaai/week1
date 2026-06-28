@@ -4,7 +4,7 @@ import { useLearner } from '../context/LearnerContext'
 import { useAuth } from '../context/AuthContext'
 import { course, getLesson, listLessons } from '../content/registry'
 import { courseCompletionPercent, nextRecommendedLessonId } from '../storage/progress'
-import { BADGES, BADGE_LABELS } from '../content/badges'
+import { BADGES, badgeMeta, listAllBadgeIds } from '../content/badges'
 import { aiGenerationOn } from '../ai/config'
 import { useAiEnabled } from '../lib/useAiEnabled'
 import { warmReviewAhead } from '../ai/reviewPrefetch'
@@ -16,14 +16,14 @@ import {
   LightbulbIcon,
   GemIcon,
   TrashIcon,
-  BadgeIcon,
-  LockIcon,
   FlagIcon,
   ChestIcon,
 } from '../components/icons'
 import { RicoBird } from '../components/RicoBird'
 import { SoundToggle } from '../components/SoundToggle'
 import { playSound } from '../lib/sound'
+import { BadgeMedalGrid } from '../components/BadgeMedalGrid'
+import { BadgeDetailCard } from '../components/BadgeDetailCard'
 
 const AVATAR_COLORS = [
   'bg-[#6bcb3d]',
@@ -43,20 +43,6 @@ const LESSON_ICONS = [PackageIcon, LightbulbIcon, CompassIcon, GemIcon]
 
 export function lessonIcon(index: number) {
   return LESSON_ICONS[index % LESSON_ICONS.length]
-}
-
-// Lesson-completion award badges live on the lessons themselves (not in
-// content/badges), so fold their labels in here once at module load. Used as a
-// fallback for any earned id BADGE_LABELS doesn't cover.
-const AWARD_LABELS: Record<string, { title: string; blurb: string }> = {}
-for (const lesson of listLessons()) {
-  if (lesson.award) {
-    AWARD_LABELS[lesson.award.id] = { title: lesson.award.title, blurb: lesson.award.blurb }
-  }
-}
-
-function badgeLabel(id: string): { title: string; blurb: string } {
-  return BADGE_LABELS[id] ?? AWARD_LABELS[id] ?? { title: id, blurb: '' }
 }
 
 // The signature element of the home screen: a dotted trail from a start flag to
@@ -240,6 +226,16 @@ function HomeDashboard() {
 
   const earnedBadges = state?.badges ?? []
   const nextGoal = BADGES.find((badge) => !earnedBadges.includes(badge.id)) ?? null
+  const [selectedBadge, setSelectedBadge] = useState<string | null>(null)
+
+  const allBadgeIds = listAllBadgeIds()
+  const badgeItems = allBadgeIds.map((id) => ({
+    badgeId: id,
+    tier: badgeMeta(id).tier,
+    earned: earnedBadges.includes(id),
+  }))
+  const earnedCount = badgeItems.filter((i) => i.earned).length
+  const totalCount = badgeItems.length
 
   const started = completedInCourse > 0 || percent > 0
   const finished = percent === 100
@@ -342,38 +338,38 @@ function HomeDashboard() {
       <section className="treasures animate-float-in" style={{ animationDelay: '0.14s' }}>
         <div className="treasures__head">
           <h2 className="treasures__title">Your treasures</h2>
-          {earnedBadges.length > 0 && (
-            <span className="treasures__count">{earnedBadges.length} earned</span>
-          )}
+          <span className="treasures__count">{earnedCount} of {totalCount}</span>
         </div>
-        <div className="trophy-shelf">
-          {earnedBadges.map((id) => {
-            const label = badgeLabel(id)
-            return (
-              <div key={id} className="trophy" title={label.blurb}>
-                <span className="trophy__medal">
-                  <BadgeIcon className="h-6 w-6" />
-                </span>
-                <span className="trophy__label">{label.title}</span>
-              </div>
-            )
-          })}
-          {nextGoal && (
-            <div className="trophy trophy--locked" title={nextGoal.blurb}>
-              <span className="trophy__medal">
-                <LockIcon className="h-5 w-5" />
-              </span>
-              <span className="trophy__label">{nextGoal.title}</span>
-            </div>
-          )}
-        </div>
-        {earnedBadges.length === 0 && (
+        <BadgeMedalGrid
+          items={badgeItems}
+          onSelect={(id) => setSelectedBadge(id)}
+        />
+        {earnedCount === 0 && (
           <p className="treasures__hint">
             Solve puzzles to earn your first treasure
             {nextGoal ? ` — ${nextGoal.blurb}` : '!'}
           </p>
         )}
       </section>
+      {selectedBadge !== null && (
+        <BadgeDetailCard
+          badgeId={selectedBadge}
+          earned={earnedBadges.includes(selectedBadge)}
+          acquiredAt={state?.badgeAcquiredAt?.[selectedBadge]}
+          earnedCount={earnedCount}
+          totalCount={totalCount}
+          medal={
+            <BadgeMedalGrid
+              items={[{ badgeId: selectedBadge, tier: badgeMeta(selectedBadge).tier, earned: earnedBadges.includes(selectedBadge) }]}
+              interactive={false}
+              showLabels={false}
+              onSelect={() => {}}
+              className="badge-detail__medal"
+            />
+          }
+          onClose={() => setSelectedBadge(null)}
+        />
+      )}
 
       <div className="home-footer">
         <button type="button" onClick={signOut} className="btn-ghost w-full">

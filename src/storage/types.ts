@@ -89,6 +89,8 @@ export interface LearnerState {
   portfolio: PortfolioArtifact[]
   /** Earned achievement ids (e.g. 'algorithm-ace'). */
   badges: string[]
+  /** Epoch ms when each badge id was earned; legacy badges may be absent. */
+  badgeAcquiredAt: Record<string, number>
   review: ReviewState
   aiUsage: AiUsage
 }
@@ -103,6 +105,7 @@ export function emptyLearnerState(learnerId: string): LearnerState {
     streak: { current: 0, longest: 0, lastCompletedDate: null },
     portfolio: [],
     badges: [],
+    badgeAcquiredAt: {},
     review: { lastReviewedAt: {}, lastDueDate: null, dueQueue: [], boxes: {} },
     aiUsage: {
       explainRequested: 0,

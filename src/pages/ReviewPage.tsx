@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import type { Lesson, MapConfig } from '../types'
 import { useLearner } from '../context/LearnerContext'
 import { registerGeneratedPuzzle } from '../content/registry'
@@ -12,7 +12,7 @@ import { buildPalette } from '../components/buildPalette'
 import { RunStrip } from '../components/RunStrip'
 import { ObjectivesChips } from '../components/ObjectivesChips'
 import { usePuzzleRun } from '../run/usePuzzleRun'
-import { nodeToInstruction, instructionToNode, iterationMap } from '../components/programNodes'
+import { nodeToInstruction, iterationMap } from '../components/programNodes'
 import { BirdGuide, type BirdMood } from '../components/BirdGuide'
 import { BadgeToast } from '../components/BadgeToast'
 import { Confetti } from '../components/Confetti'
@@ -23,10 +23,10 @@ import { aiGenerationOn } from '../ai/config'
 import { useAiEnabled } from '../lib/useAiEnabled'
 import { toPracticeStep, conceptForLesson } from '../content/generated'
 import { warmReview, warmReviewAhead, clearReview } from '../ai/reviewPrefetch'
-import { dueSkills } from '../adaptivity/mastery'
+import { dueSkills, lessonReviewQueue, belowSkilledSkills } from '../adaptivity/mastery'
 import { reviewItemForSkill } from '../content/reviewItems'
 import type { ReviewItem } from '../content/reviewItems'
-import { supportLevel, difficultyForBox } from '../adaptivity/leitner'
+import { supportLevel } from '../adaptivity/leitner'
 import type { Box } from '../adaptivity/leitner'
 import { masteryTier } from '../storage/progress'
 import type { SequenceStep, ConditionalStep } from '../types'
@@ -56,39 +56,45 @@ function puzzleToStep(item: ReviewItem): SequenceStep | ConditionalStep {
   return item.puzzle
 }
 
-function initialNodesFor(step: SequenceStep | ConditionalStep): ProgramNode[] {
+function initialNodesFor(_step: SequenceStep | ConditionalStep): ProgramNode[] {
   // blankEditor: always start empty regardless of any initialProgram.
   return []
-}
-
-// Convert difficultyForBox's absolute level (3/4/5) to a DifficultyDirection
-// for buildPracticeTemplate.
-function boxToDirection(box: Box): 'easier' | 'same' | 'harder' {
-  const level = difficultyForBox(box)
-  if (level <= 3) return 'easier'
-  if (level === 4) return 'same'
-  return 'harder'
 }
 
 export function ReviewPage() {
   useAiEnabled() // re-renders on AI Preference change
   const { ready, activeLearner, state, recordReview } = useLearner()
+  const { lessonId } = useParams<{ lessonId?: string }>()
+  const isLessonScoped = Boolean(lessonId)
 
   // Snapshot the due-skills queue once per session (computed from dueSkills at
   // mount time). Using a ref prevents the session from reshuffling mid-play when
   // recordReview mutates state (which would recompute dueSkills).
   const queueRef = useRef<string[] | null>(null)
   // Capture per-skill box before any recording, for the recap end screen.
+  // For lesson-scoped sessions this holds the unique weak skills (not the 3×-repeated queue).
   const recapRef = useRef<RecapEntry[] | null>(null)
 
   if (queueRef.current === null && state) {
-    const now = Date.now()
-    const skills = dueSkills(state, now)
-    queueRef.current = skills
-    recapRef.current = skills.map((skillId) => ({
-      skillId,
-      beforeBox: (state.review?.boxes?.[skillId]?.box ?? 1) as Box,
-    }))
+    if (isLessonScoped && lessonId) {
+      // Lesson-scoped: queue is weak skills each repeated perSkill times.
+      // recapRef holds the unique weak skills for tier-framed recap.
+      const queue = lessonReviewQueue(state, lessonId)
+      queueRef.current = queue
+      const uniqueWeakSkills = belowSkilledSkills(state, lessonId)
+      recapRef.current = uniqueWeakSkills.map((skillId) => ({
+        skillId,
+        beforeBox: (state.review?.boxes?.[skillId]?.box ?? 1) as Box,
+      }))
+    } else {
+      const now = Date.now()
+      const skills = dueSkills(state, now)
+      queueRef.current = skills
+      recapRef.current = skills.map((skillId) => ({
+        skillId,
+        beforeBox: (state.review?.boxes?.[skillId]?.box ?? 1) as Box,
+      }))
+    }
   }
 
   const queue = queueRef.current ?? []
@@ -137,11 +143,24 @@ export function ReviewPage() {
 
   const run = usePuzzleRun({
     map: step?.map ?? FALLBACK_MAP,
-    check: () =>
-      checkProgram(
-        { map: step!.map, successRule: step!.successRule, optimal: step!.optimal, feedback: step!.feedback },
+    check: () => {
+      // Review puzzles are always SequenceStep (they have successRule/optimal).
+      // ConditionalStep cannot reach here because reviewItemForSkill only
+      // returns SequenceStep puzzles, but we narrow for type safety.
+      if (!step || !isSequenceStep(step)) {
+        // Guard: ConditionalStep has no successRule — return a pass-through
+        // result that treats the run as incorrect without crashing.
+        const fallbackMap = step?.map ?? FALLBACK_MAP
+        return checkProgram(
+          { map: fallbackMap, successRule: 'reachGoal', optimal: undefined, feedback: { correct: '', hints: [] } },
+          [],
+        )
+      }
+      return checkProgram(
+        { map: step.map, successRule: step.successRule, optimal: step.optimal, feedback: step.feedback },
         program.map(nodeToInstruction),
-      ),
+      )
+    },
     onStart: () => {
       setIterations(null)
       setCelebrate(false)
@@ -273,7 +292,7 @@ export function ReviewPage() {
         busyRef.current = false
       }
     },
-    [resetPlayState, warmAhead, recordReview],
+    [resetPlayState, warmAhead],
   )
 
   useEffect(() => {
@@ -347,7 +366,7 @@ export function ReviewPage() {
       {backLink}
       <div className="flex items-center gap-3">
         <span className="step-badge inline-flex items-center gap-1">
-          <SparkleIcon className="h-3.5 w-3.5" /> Daily review
+          <SparkleIcon className="h-3.5 w-3.5" /> {isLessonScoped ? 'Lesson review' : 'Daily review'}
         </span>
         <SoundToggle />
       </div>
@@ -403,20 +422,35 @@ export function ReviewPage() {
               }
             />
           </div>
-          <h1 className="page-title">All caught up!</h1>
+          <h1 className="page-title">{isLessonScoped ? 'Review complete' : 'All caught up!'}</h1>
           {recapRef.current && recapRef.current.length > 0 ? (
             <>
               {completedCount > 0 && (
                 <p className="mt-2 text-muted">
-                  Nice reviewing — you finished {completedCount} review{completedCount === 1 ? '' : 's'} today.
+                  {isLessonScoped
+                    ? 'Nice work!'
+                    : `Nice reviewing — you finished ${completedCount} review${completedCount === 1 ? '' : 's'} today.`}
                 </p>
               )}
-              {/* Mastery recap: per-skill box change and tier — shown for all sessions
-                  (solved OR failed) so box resets are always visible. */}
+              {/* Mastery recap: per-skill outcome — shown for all sessions
+                  (solved OR failed). Lesson-scoped sessions show tier outcome;
+                  daily sessions show box deltas so resets are always visible. */}
               <div className="mt-4 space-y-2 text-left" data-testid="mastery-recap">
                 {recapRef.current.map(({ skillId, beforeBox }) => {
                   const skillStat = state.skillStats[skillId]
                   const tier = masteryTier(skillStat)
+                  if (isLessonScoped) {
+                    const skilled = tier === 'Skilled' || tier === 'Master'
+                    return (
+                      <div key={skillId} className="flex items-center justify-between rounded-lg bg-surface-alt px-3 py-2">
+                        <span className="font-medium capitalize">{skillId}</span>
+                        <span className={`flex items-center gap-2 text-sm ${skilled ? 'text-success' : 'text-muted'}`}>
+                          {skilled ? '→ Skilled ✓' : 'Keep practicing'}
+                          <span className="step-badge">{tier}</span>
+                        </span>
+                      </div>
+                    )
+                  }
                   const afterBox = state.review?.boxes?.[skillId]?.box ?? beforeBox
                   const boxChanged = afterBox !== beforeBox
                   const promoted = afterBox > beforeBox
@@ -439,7 +473,11 @@ export function ReviewPage() {
               </div>
             </>
           ) : (
-            <p className="mt-2 text-muted">Nothing to review today. Come back tomorrow!</p>
+            <p className="mt-2 text-muted">
+              {isLessonScoped
+                ? 'All sharp! These skills are already at the Skilled tier.'
+                : 'Nothing to review today. Come back tomorrow!'}
+            </p>
           )}
           <Link to="/app" className="btn-primary mt-6 inline-block">
             Back home

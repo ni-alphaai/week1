@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useLearner } from '../context/LearnerContext'
 import { course, listLessons } from '../content/registry'
@@ -11,11 +12,12 @@ import {
 } from '../storage/progress'
 import { BadgeIcon, FlameIcon, LockIcon } from '../components/icons'
 import { ProgressRing } from '../components/ProgressRing'
-import { BADGES, BADGE_LABELS } from '../content/badges'
+import { BADGES, badgeMeta, listAllBadgeIds } from '../content/badges'
 import { aiAnyOn } from '../ai/config'
 import { useAiEnabled } from '../lib/useAiEnabled'
 import { AiToggle } from '../components/AiToggle'
 import { avatarClass } from './HomePage'
+import { BadgeDetailCard } from '../components/BadgeDetailCard'
 
 const SKILL_LABELS: Record<string, string> = {
   sequencing: 'Sequencing',
@@ -24,19 +26,6 @@ const SKILL_LABELS: Record<string, string> = {
   conditionals: 'Conditionals (if / else)',
   loops: 'Loops (for / while)',
   planning: 'Planning & problem-solving',
-}
-
-// Labels for the lesson-completion award badges, which live on the lessons (not
-// in content/badges). Used as a fallback for any id BADGE_LABELS doesn't cover.
-const AWARD_LABELS: Record<string, { title: string; blurb: string }> = {
-  'combo-coder': { title: 'Combo Coder', blurb: 'Completed the loops lesson.' },
-  'algorithm-ace': { title: 'Algorithm Ace', blurb: 'Completed the algorithm challenges.' },
-}
-
-// Resolve a badge id to its richer label, preferring the content/badges source
-// of truth and falling back to the lesson-award map, then the raw id.
-function badgeLabel(id: string): { title: string; blurb: string } {
-  return BADGE_LABELS[id] ?? AWARD_LABELS[id] ?? { title: id, blurb: '' }
 }
 
 const TIER_CLASS: Record<MasteryTier, string> = {
@@ -94,6 +83,7 @@ function Donut({ segments, size = 132, stroke = 16 }: { segments: Segment[]; siz
 export function ParentPage() {
   useAiEnabled() // re-renders on AI Preference change
   const { ready, activeLearner, state } = useLearner()
+  const [selectedBadge, setSelectedBadge] = useState<string | null>(null)
 
   if (!ready) {
     return <div className="flex min-h-full items-center justify-center text-muted">Loading…</div>
@@ -188,11 +178,17 @@ export function ParentPage() {
         {badges.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {badges.map((id) => {
-              const label = badgeLabel(id)
+              const meta = badgeMeta(id)
               return (
-                <span key={id} className="badge-chip badge-chip--lg" title={label.blurb}>
-                  <BadgeIcon className="h-5 w-5" /> {label.title}
-                </span>
+                <button
+                  key={id}
+                  type="button"
+                  className="badge-chip badge-chip--lg"
+                  title={meta.blurb}
+                  onClick={() => setSelectedBadge(id)}
+                >
+                  <BadgeIcon className="h-5 w-5" /> {meta.title}
+                </button>
               )
             })}
           </div>
@@ -207,18 +203,35 @@ export function ParentPage() {
             <h3 className="section-label mb-2 mt-4 text-soft">Goals to unlock</h3>
             <div className="flex flex-wrap gap-2">
               {lockedBadges.map((badge) => (
-                <span
+                <button
                   key={badge.id}
+                  type="button"
                   className="badge-chip badge-chip--lg opacity-55 grayscale"
                   title={badge.blurb}
+                  onClick={() => setSelectedBadge(badge.id)}
                 >
                   <LockIcon className="h-4 w-4" /> {badge.title}
-                </span>
+                </button>
               ))}
             </div>
           </>
         )}
       </section>
+      {selectedBadge !== null && (() => {
+        const allBadgeIds = listAllBadgeIds()
+        const earnedCount = allBadgeIds.filter((id) => badges.includes(id)).length
+        const totalCount = allBadgeIds.length
+        return (
+          <BadgeDetailCard
+            badgeId={selectedBadge}
+            earned={badges.includes(selectedBadge)}
+            acquiredAt={state.badgeAcquiredAt?.[selectedBadge]}
+            earnedCount={earnedCount}
+            totalCount={totalCount}
+            onClose={() => setSelectedBadge(null)}
+          />
+        )
+      })()}
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
         <div className="card p-5">

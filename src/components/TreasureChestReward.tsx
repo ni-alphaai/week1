@@ -1,34 +1,10 @@
 import { Suspense, lazy, useMemo, type ReactNode } from 'react'
+import { prefersReducedMotion, supportsWebGL } from '../lib/webgl'
 
 // Light wrapper around the three.js scene. The scene (and therefore three.js)
 // is loaded lazily, so it only ships to learners who actually reach a reward
 // and whose device can render it. Everything here is dependency-free.
 const TreasureChestScene = lazy(() => import('./TreasureChestScene'))
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  )
-}
-
-function supportsWebGL(): boolean {
-  if (typeof document === 'undefined') return false
-  try {
-    if (!window.WebGLRenderingContext) return false
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('webgl2') ?? canvas.getContext('webgl')
-    if (!ctx) return false
-    // Release the probe context right away — browsers cap live WebGL contexts
-    // (~16), and every reward screen probes, so leaking one per mount can
-    // starve the real scene's renderer in a long session.
-    ctx.getExtension('WEBGL_lose_context')?.loseContext()
-    return true
-  } catch {
-    return false
-  }
-}
 
 export interface TreasureChestRewardProps {
   variant?: 'chest' | 'badge'

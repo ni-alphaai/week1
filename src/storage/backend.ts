@@ -24,6 +24,8 @@ export function deleteLearner(owner: string, learnerId: string): Promise<void> {
 // Backfills fields added in newer versions so older saved states stay valid.
 function normalizeState(state: LearnerState): LearnerState {
   const next = Array.isArray(state.badges) ? state : { ...state, badges: [] }
+  // badgeAcquiredAt was added after initial release; legacy stored states lack it.
+  if (!(next as { badgeAcquiredAt?: unknown }).badgeAcquiredAt) next.badgeAcquiredAt = {}
   // Drop legacy saved programs (the old card-id string[] format) so the new
   // composable editor never tries to restore an incompatible shape.
   for (const progress of Object.values(next.lessonProgress ?? {})) {

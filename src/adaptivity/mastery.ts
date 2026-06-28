@@ -82,14 +82,37 @@ export function dueSkills(state: LearnerState, now = Date.now(), cap = DUE_CAP):
   return due.slice(0, cap).map((e) => e.skillId)
 }
 
+// Returns the lesson's skillIds whose mastery tier is below 'Skilled'
+// (i.e. 'Novice' or 'Apprentice'). Preserves lesson skillIds order.
+// Returns [] for an unknown lesson id or a lesson with no skillIds.
+export function belowSkilledSkills(state: LearnerState, lessonId: string): string[] {
+  const lesson = getLesson(lessonId)
+  if (!lesson || lesson.skillIds.length === 0) return []
+  return lesson.skillIds.filter((id) => {
+    const tier = masteryTier(state.skillStats[id])
+    return tier === 'Novice' || tier === 'Apprentice'
+  })
+}
+
 // True if any of the lesson's skills are below the Skilled mastery tier.
 // Used to decide whether to show the Soft Gate nudge on the lesson completion screen.
 // Returns false for unknown lesson ids (no skillIds to check).
 export function belowSkilled(state: LearnerState, lessonId: string): boolean {
-  const lesson = getLesson(lessonId)
-  if (!lesson || lesson.skillIds.length === 0) return false
-  return lesson.skillIds.some((id) => {
-    const tier = masteryTier(state.skillStats[id])
-    return tier === 'Novice' || tier === 'Apprentice'
-  })
+  return belowSkilledSkills(state, lessonId).length > 0
+}
+
+// Returns a review queue for the given lesson: each below-Skilled skill id
+// repeated `perSkill` times, grouped by skill in lesson order.
+// e.g. weak skills ['loops','planning'], perSkill 3 →
+//   ['loops','loops','loops','planning','planning','planning']
+// Returns [] when there are no below-Skilled skills.
+export function lessonReviewQueue(state: LearnerState, lessonId: string, perSkill = 3): string[] {
+  const weak = belowSkilledSkills(state, lessonId)
+  const queue: string[] = []
+  for (const id of weak) {
+    for (let i = 0; i < perSkill; i++) {
+      queue.push(id)
+    }
+  }
+  return queue
 }
