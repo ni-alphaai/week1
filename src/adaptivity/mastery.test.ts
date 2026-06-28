@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { emptyLearnerState } from '../storage/types'
 import type { SkillStat } from '../storage/types'
 import type { Box } from './leitner'
-import { belowSkilled, belowSkilledSkills, decayedSuccessRate, dueSkills, lessonMastery, lessonReviewQueue, lessonSuccessRate } from './mastery'
+import { belowSkilled, belowSkilledSkills, belowSkilledTiers, decayedSuccessRate, dueSkills, lessonMastery, lessonReviewQueue, lessonSuccessRate } from './mastery'
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = 100 * DAY
@@ -262,5 +262,23 @@ describe('lessonReviewQueue', () => {
 
   it('returns [] for an unknown lesson id', () => {
     expect(lessonReviewQueue(stateAt(80, 2), 'nonexistent-lesson')).toEqual([])
+  })
+})
+
+describe('belowSkilledTiers', () => {
+  it('lists each below-Skilled skill with its tier and label', () => {
+    const state = stateAt(40, 3) // low score → below Skilled
+    const tiers = belowSkilledTiers(state, 'lesson-1-sequencing-cargo')
+    expect(tiers.length).toBeGreaterThan(0)
+    for (const t of tiers) {
+      expect(t.label).toBeTruthy()
+      expect(t.tier).toBeTruthy()
+      expect(['sequencing', 'planning']).toContain(t.skillId)
+    }
+  })
+
+  it('returns [] when all the lesson skills are Skilled+', () => {
+    const state = stateAt(100, 10) // high mastery → Skilled or above
+    expect(belowSkilledTiers(state, 'lesson-1-sequencing-cargo')).toEqual([])
   })
 })

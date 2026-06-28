@@ -17,7 +17,7 @@ import { conceptForLesson, buildPracticeTemplate, toPracticeStep } from '../cont
 import { warmSmallerVariant, consumeSmallerVariant, clearSmallerVariant } from '../ai/variantPrefetch'
 import { encodePuzzle } from '../content/shareCode'
 import { nextDifficultyDirection } from '../adaptivity/difficulty'
-import { belowSkilled, lessonSuccessRate } from '../adaptivity/mastery'
+import { belowSkilled, belowSkilledTiers, lessonSuccessRate } from '../adaptivity/mastery'
 import { MapGrid } from '../components/MapGrid'
 import { CommandSequence } from '../components/CommandSequence'
 import type { ProgramNode } from '../components/CommandSequence'
@@ -565,6 +565,7 @@ export function LessonPage() {
     const streak = state?.streak.current ?? 0
     const earnedBadge = lesson.award && (state?.badges?.includes(lesson.award.id) ?? false)
     const showSoftGate = state ? belowSkilled(state, lesson.id) : false
+    const weakTiers = state ? belowSkilledTiers(state, lesson.id) : []
     return (
       <div className="animate-float-in mx-auto max-w-md px-4 py-10">
         <BadgeToast />
@@ -613,7 +614,9 @@ export function LessonPage() {
           {showSoftGate && (
             <div className="soft-gate-nudge mt-5 rounded-lg bg-[var(--color-surface-strong)] px-4 py-3 text-sm text-muted" data-testid="soft-gate-nudge">
               <p className="font-medium text-[var(--color-text)]">Keep sharpening these skills</p>
-              <p className="mt-0.5">Review this lesson to reach the Skilled tier before moving on.</p>
+              <p className="soft-gate-nudge__detail mt-0.5">
+                {weakTiers.map((t) => `${t.label}: ${t.tier}`).join(' · ')} — reach Skilled to move on.
+              </p>
             </div>
           )}
           <div className="mt-6 flex flex-col gap-2">
@@ -634,11 +637,9 @@ export function LessonPage() {
             ) : (
               <p className="text-muted">You completed every lesson. Amazing!</p>
             )}
-            {aiGenerationOn() && (
-              <Link to={`/practice/${lesson.id}`} onClick={() => playSound('click')} className="btn-ghost">
-                Keep practicing
-              </Link>
-            )}
+            <Link to={`/practice/${lesson.id}`} onClick={() => playSound('click')} className="btn-ghost">
+              Keep practicing
+            </Link>
             <Link to="/app" onClick={() => playSound('click')} className="btn-ghost">
               Back to course
             </Link>

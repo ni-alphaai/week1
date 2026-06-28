@@ -9,6 +9,8 @@ import type { SequenceStep, ConditionalStep } from '../types'
 import { isSequenceStep, isConditionalStep } from '../types'
 import { listLessons } from './registry'
 import type { Box } from '../adaptivity/leitner'
+import { selectPuzzle } from './puzzleSelector'
+import { difficultyForBox } from '../adaptivity/leitner'
 
 export type ReviewItem = {
   skillId: string
@@ -46,18 +48,19 @@ export function authoredItemForSkill(skillId: string): SequenceStep | Conditiona
  * rather than silently returning an item with a null puzzle).
  */
 export function reviewItemForSkill(skillId: string, box: Box): ReviewItem {
-  const puzzle = authoredItemForSkill(skillId)
-  if (puzzle === null) {
+  const anchor = authoredItemForSkill(skillId)
+  if (anchor === null) {
     throw new Error(
       `reviewItemForSkill: no authored puzzle found for skill "${skillId}". ` +
         'Every skill must have at least one authored sequence or conditional step.',
     )
   }
-  return {
+  const selected = selectPuzzle({
     skillId,
-    box,
-    puzzle,
-    source: 'authored',
-    blankEditor: true,
-  }
+    targetDifficulty: difficultyForBox(box),
+    preferMechanics: box >= 3,
+    kind: anchor.type, // preserve this skill's existing step kind — no cross-kind leak
+  })
+  const puzzle = selected ? selected.step : anchor
+  return { skillId, box, puzzle, source: 'authored', blankEditor: true }
 }

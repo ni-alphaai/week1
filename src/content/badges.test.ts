@@ -192,14 +192,14 @@ describe('evaluateBadges — idempotence', () => {
 })
 
 describe('tierForRarity', () => {
-  it('maps common → bronze', () => {
-    expect(tierForRarity('common')).toBe('bronze')
+  it('maps common → silver', () => {
+    expect(tierForRarity('common')).toBe('silver')
   })
-  it('maps uncommon → silver', () => {
-    expect(tierForRarity('uncommon')).toBe('silver')
+  it('maps uncommon → gold', () => {
+    expect(tierForRarity('uncommon')).toBe('gold')
   })
-  it('maps rare → gold', () => {
-    expect(tierForRarity('rare')).toBe('gold')
+  it('maps rare → diamond', () => {
+    expect(tierForRarity('rare')).toBe('diamond')
   })
 })
 
@@ -212,38 +212,38 @@ describe('BADGES rarity coverage', () => {
 })
 
 describe('badgeMeta — achievement badges', () => {
-  it('returns rare/gold for optimal-solver', () => {
+  it('returns rare/diamond for optimal-solver', () => {
     const meta = badgeMeta('optimal-solver')
     expect(meta.rarity).toBe('rare')
-    expect(meta.tier).toBe('gold')
+    expect(meta.tier).toBe('diamond')
     expect(meta.title).toBe('Optimal Solver')
   })
 
-  it('returns common/bronze for first-loop', () => {
+  it('returns common/silver for first-loop', () => {
     const meta = badgeMeta('first-loop')
     expect(meta.rarity).toBe('common')
-    expect(meta.tier).toBe('bronze')
+    expect(meta.tier).toBe('silver')
   })
 
-  it('returns uncommon/silver for first-while', () => {
+  it('returns uncommon/gold for first-while', () => {
     const meta = badgeMeta('first-while')
     expect(meta.rarity).toBe('uncommon')
-    expect(meta.tier).toBe('silver')
+    expect(meta.tier).toBe('gold')
   })
 })
 
 describe('badgeMeta — lesson-award badges', () => {
-  it('returns rare/gold for lesson6 capstone award (algorithm-ace)', () => {
+  it('returns rare/diamond for lesson6 capstone award (algorithm-ace)', () => {
     const meta = badgeMeta('algorithm-ace')
     expect(meta.rarity).toBe('rare')
-    expect(meta.tier).toBe('gold')
+    expect(meta.tier).toBe('diamond')
     expect(meta.title).toBe('Algorithm Ace')
   })
 
-  it('returns uncommon/silver for lesson5 award (combo-coder)', () => {
+  it('returns uncommon/gold for lesson5 award (combo-coder)', () => {
     const meta = badgeMeta('combo-coder')
     expect(meta.rarity).toBe('uncommon')
-    expect(meta.tier).toBe('silver')
+    expect(meta.tier).toBe('gold')
   })
 })
 
@@ -253,6 +253,6 @@ describe('badgeMeta — unknown id fallback', () => {
     expect(meta.title).toBe('totally-unknown-badge')
     expect(meta.blurb).toBe('')
     expect(meta.rarity).toBe('common')
-    expect(meta.tier).toBe('bronze')
+    expect(meta.tier).toBe('silver')
   })
 })

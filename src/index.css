@@ -952,14 +952,10 @@ body {
 
 /* ── Badge tier frames ────────────────────────────────────────────────────────
    Applied to .badge-tile (grid) and the medal container in .badge-detail-card.
-   Bronze, Silver, Gold ring colors map to rarity: common, uncommon, rare.
+   This is the 2D fallback shown when WebGL is unavailable; the live 3D coin
+   replaces it otherwise. Silver, Gold, Diamond map to rarity common, uncommon,
+   rare — modelled on CS:GO operation coins, with diamond as the ice-blue trophy.
    ─────────────────────────────────────────────────────────────────────────── */
-
-.badge-tier--bronze .badge-tile__medal,
-.badge-detail-card__medal.badge-tier--bronze {
-  background: linear-gradient(135deg, #e8a87c, #cd7f32);
-  box-shadow: 0 4px 12px rgb(205 127 50 / 0.45);
-}
 
 .badge-tier--silver .badge-tile__medal,
 .badge-detail-card__medal.badge-tier--silver {
@@ -971,6 +967,34 @@ body {
 .badge-detail-card__medal.badge-tier--gold {
   background: linear-gradient(135deg, #ffe08a, #f5b73c);
   box-shadow: 0 4px 12px rgb(245 183 60 / 0.5);
+}
+
+.badge-tier--diamond .badge-tile__medal,
+.badge-detail-card__medal.badge-tier--diamond {
+  background: linear-gradient(135deg, #e6f8ff, #7fc8ee 55%, #3f9fd6);
+  box-shadow: 0 4px 14px rgb(63 159 214 / 0.55);
+}
+
+/* ── Spotlight stage (per-tier glow) ──────────────────────────────────────────
+   The coin's "display-case" lighting. --badge-glow is a per-tier RGB triplet
+   (space-separated so alpha can be set per use) hung off the existing
+   badge-tier--* classes, so both the detail modal stage and the grid tile halos
+   pick up the right tint with no extra plumbing.
+     silver (Common)  → cool blue   gold (Uncommon) → warm amber
+     diamond (Rare)   → icy cyan
+   ─────────────────────────────────────────────────────────────────────────── */
+.badge-tier--silver  { --badge-glow: 125 175 235; }
+.badge-tier--gold    { --badge-glow: 242 192 92; }
+.badge-tier--diamond { --badge-glow: 120 222 255; }
+
+/* Detail modal: the coin sits on a dark radial "spotlight stage" instead of the
+   card's flat slate panel — a tier-tinted glow centred behind the coin fading to
+   near-black, so the metal pops. Text content below stays on the card surface. */
+.badge-stage {
+  position: relative;
+  background:
+    radial-gradient(circle at 50% 44%, rgb(var(--badge-glow) / 0.6), transparent 58%),
+    radial-gradient(circle at 50% 50%, #1b2230, #090c12 78%);
 }
 
 /* ── BadgeMedalGrid tile styles ───────────────────────────────────────────── */
@@ -1001,7 +1025,6 @@ body {
 
 .badge-tile:hover {
   background: var(--color-surface-strong);
-  transform: translateY(-2px);
 }
 
 .badge-tile:focus-visible {
@@ -1020,6 +1043,7 @@ div.badge-tile:hover {
 }
 
 .badge-tile__medal {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1030,6 +1054,24 @@ div.badge-tile:hover {
   /* Default gradient — overridden by tier classes above */
   background: linear-gradient(135deg, #ffe08a, #f5b73c);
   box-shadow: 0 5px 14px rgb(245 183 60 / 0.45);
+}
+
+/* Per-tier spotlight halo behind each grid coin. A pseudo-element (not the slot
+   background, which is nulled when the 3D coin is active) so the glow survives
+   under both the 2D fallback and the live 3D medallion. z-index:-1 keeps it
+   behind the shared coin canvas, which paints over the tiles. */
+.badge-tile__medal::before {
+  content: "";
+  position: absolute;
+  inset: -28%;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgb(var(--badge-glow) / 0.45), transparent 70%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.badge-tile--locked .badge-tile__medal::before {
+  opacity: 0.4;
 }
 
 .badge-tile__label {
@@ -1066,12 +1108,29 @@ div.badge-tile:hover {
 }
 
 .badge-detail__medal .badge-tile__medal {
-  width: 4.5rem;
-  height: 4.5rem;
+  width: 9rem;
+  height: 9rem;
 }
 
-/* 3D tile: when the WebGL scene is active, hide the 2D emblem underneath */
-.badge-tile[data-medal-3d="true"] .badge-tile__emblem {
+/* In the detail modal the dark .badge-stage already supplies the glow, so the
+   per-tile halo would double up — suppress it for the solo medal. */
+.badge-detail__medal .badge-tile__medal::before {
+  display: none;
+}
+
+/* 3D tile: when the WebGL scene is active, the data-medal-3d marker sits on the
+   medal slot itself. Drop the 2D gradient/shadow backing and the 2D emblem so
+   only the live 3D medallion shows through. */
+.badge-tile__medal[data-medal-3d="true"] {
+  background: none;
+  box-shadow: none;
+  border: none;
+}
+
+/* The live 3D coin renders on top, so hide every DOM child of the slot — the
+   earned emblem AND the locked LockIcon (locked badges render the struck emblem
+   in a 3D blued-steel finish). */
+.badge-tile__medal[data-medal-3d="true"] > * {
   visibility: hidden;
 }
 
@@ -1080,6 +1139,73 @@ div.badge-tile:hover {
   .badge-tile:hover {
     transition: none !important;
     transform: none !important;
+  }
+}
+
+/* ── Badge hover tooltip ───────────────────────────────────────────────────────
+   Custom replacement for the native `title` tooltip (which the browser pinned to
+   the page corner near viewport edges). Rendered in a portal on document.body
+   and positioned by placeTooltip(); fixed so it floats above all stacking. */
+.badge-tooltip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 16rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 12px;
+  background: var(--color-text);
+  color: var(--color-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
+  pointer-events: none;
+  text-align: left;
+}
+
+.badge-tooltip__title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.badge-tooltip__blurb {
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.3;
+  opacity: 0.85;
+}
+
+/* Caret pointing toward the anchored tile. */
+.badge-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  background: var(--color-text);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.badge-tooltip--above::after {
+  bottom: -4px;
+}
+
+.badge-tooltip--below::after {
+  top: -4px;
+}
+
+.badge-tooltip--animate {
+  animation: badge-tooltip-in 0.12s ease-out;
+}
+
+@keyframes badge-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

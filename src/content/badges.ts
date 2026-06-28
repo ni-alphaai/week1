@@ -8,12 +8,15 @@ import type { LearnerState } from '../storage/types'
 import { listLessons } from './registry'
 
 export type { BadgeRarity }
-export type BadgeTier = 'bronze' | 'silver' | 'gold'
+export type BadgeTier = 'silver' | 'gold' | 'diamond'
 
+// Rarity → struck-coin tier, modelled on CS:GO operation coins: silver and gold
+// are earned metals, diamond is the top trophy (a faceted ice-blue gem, not a
+// metal). Higher rarity reads as more precious.
 export function tierForRarity(rarity: BadgeRarity): BadgeTier {
-  if (rarity === 'uncommon') return 'silver'
-  if (rarity === 'rare') return 'gold'
-  return 'bronze'
+  if (rarity === 'uncommon') return 'gold'
+  if (rarity === 'rare') return 'diamond'
+  return 'silver'
 }
 
 export interface AwardCtx {

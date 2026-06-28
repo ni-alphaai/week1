@@ -46,9 +46,9 @@ describe('BadgeDetailCard — earned badge content', () => {
     expect(screen.getByText(/fewest moves/i)).toBeInTheDocument()
   })
 
-  it('shows "Gold · Rare" tier chip for a rare badge', () => {
+  it('shows "Diamond · Rare" tier chip for a rare badge', () => {
     renderCard()
-    expect(screen.getByText(/Gold\s*·\s*Rare/i)).toBeInTheDocument()
+    expect(screen.getByText(/Diamond\s*·\s*Rare/i)).toBeInTheDocument()
   })
 
   it('shows an Earned date when acquiredAt is provided', () => {
@@ -85,6 +85,19 @@ describe('BadgeDetailCard — locked badge content', () => {
     renderCard({ earned: false, acquiredAt: undefined })
     expect(screen.queryByText(/Earned \w+ \d/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Earned earlier/i)).not.toBeInTheDocument()
+  })
+})
+
+// ─── Spotlight stage tests ──────────────────────────────────────────────────────
+
+describe('BadgeDetailCard — spotlight stage', () => {
+  it('renders a per-tier spotlight stage behind the medal (tier hook wired)', () => {
+    const { container } = renderCard()
+    // 'optimal-solver' → Diamond tier (see tier-chip test above).
+    const stage = container.querySelector('.badge-stage')
+    expect(stage).not.toBeNull()
+    expect(stage).toHaveClass('badge-tier--diamond')
+    expect(stage).toHaveAttribute('data-tier', 'diamond')
   })
 })
 

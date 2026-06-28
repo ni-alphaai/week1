@@ -18,15 +18,7 @@ import { useAiEnabled } from '../lib/useAiEnabled'
 import { AiToggle } from '../components/AiToggle'
 import { avatarClass } from './HomePage'
 import { BadgeDetailCard } from '../components/BadgeDetailCard'
-
-const SKILL_LABELS: Record<string, string> = {
-  sequencing: 'Sequencing',
-  'order-dependence': 'Ordering & planning',
-  efficiency: 'Efficiency',
-  conditionals: 'Conditionals (if / else)',
-  loops: 'Loops (for / while)',
-  planning: 'Planning & problem-solving',
-}
+import { skillLabel } from '../content/skillLabels'
 
 const TIER_CLASS: Record<MasteryTier, string> = {
   Novice: 'tier--novice',
@@ -133,7 +125,7 @@ export function ParentPage() {
       : percent === 100
         ? `${name} finished the whole course — a real Master Coder! 🎉`
         : topSkill
-          ? `${name} is doing great at ${SKILL_LABELS[topSkill.id] ?? topSkill.id} and has solved ${puzzlesSolved} puzzle${puzzlesSolved === 1 ? '' : 's'} so far.`
+          ? `${name} is doing great at ${skillLabel(topSkill.id)} and has solved ${puzzlesSolved} puzzle${puzzlesSolved === 1 ? '' : 's'} so far.`
           : `${name} is just getting started — nice momentum!`
 
   const longest = Math.max(state.streak.longest, state.streak.current)
@@ -329,7 +321,7 @@ export function ParentPage() {
                 <div key={skillId} className="card p-4">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2 font-medium text-[var(--color-text)]">
-                      {SKILL_LABELS[skillId] ?? skillId}
+                      {skillLabel(skillId)}
                       {(struggleBySkill.get(skillId)?.struggles ?? 0) > 0 && (
                         <span className="rounded-full bg-[var(--color-surface-strong)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-soft">
                           needs review

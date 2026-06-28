@@ -245,4 +245,20 @@ describe('Soft Gate (lesson completion screen)', () => {
     expect(link).toHaveClass('btn-primary')
     expect(link).not.toHaveClass('btn-ghost')
   })
+
+  it('soft-gate nudge names each below-Skilled skill with its tier', async () => {
+    renderLesson()
+    act(() => holder.deliverState!(completedWithStats(2, 2))) // below Skilled
+    await screen.findByText('Lesson complete')
+    const nudge = screen.getByTestId('soft-gate-nudge')
+    expect(nudge.textContent).toMatch(/Sequencing/)
+    expect(nudge.textContent).toMatch(/reach Skilled to move on/i)
+  })
+
+  it('offers "Keep practicing" with AI off', async () => {
+    renderLesson()
+    act(() => holder.deliverState!(completedLessonState()))
+    await screen.findByText('Lesson complete')
+    expect(screen.getByRole('link', { name: /keep practicing/i })).toBeInTheDocument()
+  })
 })

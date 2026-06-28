@@ -81,7 +81,7 @@ function puzzleToExemplar(puzzle: GeneratedPuzzle): object {
   return exemplar
 }
 
-function mapMechanicsFromStep(map: MapConfig, actions: Action[] | undefined): string[] {
+export function mapMechanicsFromStep(map: MapConfig, actions: Action[] | undefined): string[] {
   const found: string[] = []
   if (map.teleports?.length) found.push('teleports')
   if (map.tasks?.length) found.push('tasks')
@@ -217,32 +217,14 @@ export function smallerVariantTemplate(lesson: Lesson): PuzzleTemplate | null {
   return { ...template, priorGenerated: [] }
 }
 
-// A deterministic, AI-free "smaller version": the lesson's own simplest authored
-// play step, converted to the GeneratedPuzzle shape. Authored steps are verified
-// content, and we re-run each solution through the engine here so we only ever
-// return a genuinely solvable puzzle. This is the reliability backbone of "Try a
-// smaller version" — it lets the feature work even when AI generation is
-// unavailable, slow, or abstains, so the affordance never just vanishes.
-// Returns null only when the lesson has no runnable authored play step.
-export function deriveSmallerVariantPuzzle(lesson: Lesson): GeneratedPuzzle | null {
-  const playSteps = lesson.steps.filter(
-    (s): s is SequenceStep | ConditionalStep => s.type === 'sequence' || s.type === 'conditional',
-  )
-  // Pick the easiest: the fewest actual moves its verified solution executes.
-  let best: { step: SequenceStep | ConditionalStep; moves: number } | null = null
-  for (const step of playSteps) {
-    const run = runInstructions(step.map, step.solution)
-    if (run.status !== 'success') continue
-    const moves = run.path.length - 1
-    if (!best || moves < best.moves) best = { step, moves }
-  }
-  if (!best) return null
-
-  const { step, moves } = best
+export function authoredStepToPuzzle(
+  step: SequenceStep | ConditionalStep,
+  lesson: Lesson,
+  moves: number,
+): GeneratedPuzzle {
   const lessonConcept = conceptForLesson(lesson)
   const concept: GeneratedConcept =
     lessonConcept && lessonConcept !== 'mixed' ? lessonConcept : 'navigation'
-
   return {
     map: step.map,
     availableCommands: step.availableCommands,
@@ -256,10 +238,45 @@ export function deriveSmallerVariantPuzzle(lesson: Lesson): GeneratedPuzzle | nu
     optimal: moves,
     difficulty: moves,
     concept,
-    // Flows through toPracticeStep like a generated puzzle; the source map and
-    // solution are authored, but it is served via the same generated-practice path.
     aiGenerated: true,
   }
+}
+
+export function authoredPracticeStep(
+  step: SequenceStep | ConditionalStep,
+  lesson: Lesson,
+): SequenceStep | null {
+  const run = runInstructions(step.map, step.solution)
+  if (run.status !== 'success') return null
+  return toPracticeStep(authoredStepToPuzzle(step, lesson, run.path.length - 1), lesson)
+}
+
+// A deterministic, AI-free "smaller version": the lesson's own simplest authored
+// play step, converted to the GeneratedPuzzle shape. Prefers mechanic-bearing steps
+// so the smaller version keeps the lesson's mechanics; falls back to fewest-move
+// overall when no mechanic-bearing step is runnable.
+// Sequence steps only — toPracticeStep forces a reachGoal sequence, which would
+// silently drop a conditional step's requiresConditional rule and let a flat path
+// pass; restricting here mirrors authoredPracticeFloor's kind:'sequence'.
+// Returns null only when the lesson has no runnable authored sequence step.
+export function deriveSmallerVariantPuzzle(lesson: Lesson): GeneratedPuzzle | null {
+  type Candidate = { step: SequenceStep; moves: number; hasMechanic: boolean }
+  const runnable: Candidate[] = []
+  for (const step of lesson.steps) {
+    if (!isSequenceStep(step)) continue
+    const run = runInstructions(step.map, step.solution)
+    if (run.status !== 'success') continue
+    runnable.push({
+      step,
+      moves: run.path.length - 1,
+      hasMechanic: mapMechanicsFromStep(step.map, step.availableActions).length > 0,
+    })
+  }
+  if (runnable.length === 0) return null
+  const mechanicBearing = runnable.filter((c) => c.hasMechanic)
+  const pool = mechanicBearing.length > 0 ? mechanicBearing : runnable
+  const best = pool.reduce((a, b) => (b.moves < a.moves ? b : a))
+  return authoredStepToPuzzle(best.step, lesson, best.moves)
 }
 
 export function toPracticeStep(puzzle: GeneratedPuzzle, lesson: Lesson): SequenceStep {

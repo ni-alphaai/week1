@@ -26,7 +26,8 @@ import type { GeneratedPuzzle } from '../ai/generation'
 import { getExplanation } from '../ai/explain'
 import { toPracticeStep, conceptForLesson, buildPracticeTemplate, clearPracticeSession, recordPracticePuzzle } from '../content/generated'
 import { lessonSuccessRate } from '../adaptivity/mastery'
-import { nextDifficultyDirection } from '../adaptivity/difficulty'
+import { nextDifficultyDirection, targetLevelForDirection } from '../adaptivity/difficulty'
+import { authoredPracticeFloor } from '../content/puzzleSelector'
 import { ensurePrefetchDepth, takePrefetched, PREFETCH_QUEUE_DEPTH } from '../ai/practicePrefetch'
 
 const DIRECTION_LABEL: Record<'easier' | 'same' | 'harder', string> = {
@@ -90,6 +91,8 @@ export function PracticePage() {
   // Small ring buffer of recent puzzle signatures fed to the model as an
   // anti-repetition `avoid` list so consecutive puzzles do not look identical.
   const recentSignaturesRef = useRef<string[]>([])
+  // Ring buffer of recent authored step ids for the AI-off floor, for variety.
+  const recentAuthoredRef = useRef<string[]>([])
 
   const clearTimers = useCallback(() => {
     timers.current.forEach((id) => window.clearTimeout(id))
@@ -166,14 +169,34 @@ export function PracticePage() {
     return generatePuzzle(template).catch(() => null)
   }, [lesson, currentDirection])
 
+  const serveAuthoredFloor = useCallback(() => {
+    if (!lesson) return
+    const step = authoredPracticeFloor(
+      lesson,
+      targetLevelForDirection(currentDirection()),
+      new Set(recentAuthoredRef.current),
+    )
+    if (!step) {
+      setAbstained(true)
+      setLoading(false)
+      return
+    }
+    recentAuthoredRef.current = [...recentAuthoredRef.current, step.id].slice(-5)
+    setStep(step)
+    setProgram(initialNodesFor(step))
+    startedAtRef.current = Date.now()
+    setAbstained(false)
+    setLoading(false)
+  }, [lesson, currentDirection])
+
   const loadPuzzle = useCallback(async () => {
     // Single-flight: never run two loads at once (e.g. a fast double "Next" or
     // StrictMode's double-invoked effect) so we don't double-generate or stomp
     // each other's state.
     if (busyRef.current) return
-    if (!lesson || !aiGenerationOn()) {
-      setLoading(false)
-      setAbstained(!aiGenerationOn())
+    if (!lesson) return
+    if (!aiGenerationOn()) {
+      serveAuthoredFloor()
       return
     }
     busyRef.current = true
@@ -188,12 +211,10 @@ export function PracticePage() {
       setShareCopied(false)
       setProgram([])
 
-      // Lessons with no matching generator skip AI entirely and abstain to
+      // Lessons with no matching generator skip AI entirely and fall back to
       // authored practice — never call generatePuzzle with a null concept.
       if (!conceptForLesson(lesson)) {
-        setAbstained(true)
-        setStep(null)
-        setLoading(false)
+        serveAuthoredFloor()
         return
       }
 
@@ -221,9 +242,7 @@ export function PracticePage() {
       ensurePrefetchDepth(lesson.id, requestPuzzle, PREFETCH_QUEUE_DEPTH)
 
       if (!puzzle) {
-        setAbstained(true)
-        setStep(null)
-        setLoading(false)
+        serveAuthoredFloor()
         return
       }
       if (!fromPrefetch) recordPracticePuzzle(lesson.id, puzzle)
@@ -360,15 +379,7 @@ export function PracticePage() {
         </div>
       </header>
 
-      {!aiGenerationOn() ? (
-        <div className="card-elevated mx-auto max-w-md p-8 text-center">
-          <h1 className="font-display text-xl font-bold text-[var(--color-text)]">Practice is turned off</h1>
-          <p className="mt-2 text-muted">Endless practice puzzles need AI to be switched on.</p>
-          <Link to="/app" className="btn-primary mt-6 inline-block">
-            Back to course
-          </Link>
-        </div>
-      ) : loading ? (
+      {loading ? (
         <div className="card-elevated mx-auto max-w-md p-8 text-center">
           <BirdGuide message="Let me build you a fresh puzzle…" mood="explain" typewriter={false} />
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useLearner } from '../context/LearnerContext'
 import { useAuth } from '../context/AuthContext'
@@ -224,16 +224,21 @@ function HomeDashboard() {
   const streak = state?.streak.current ?? 0
   const name = activeLearner?.displayName ?? 'explorer'
 
-  const earnedBadges = state?.badges ?? []
+  const earnedBadges = useMemo(() => state?.badges ?? [], [state?.badges])
   const nextGoal = BADGES.find((badge) => !earnedBadges.includes(badge.id)) ?? null
   const [selectedBadge, setSelectedBadge] = useState<string | null>(null)
 
-  const allBadgeIds = listAllBadgeIds()
-  const badgeItems = allBadgeIds.map((id) => ({
-    badgeId: id,
-    tier: badgeMeta(id).tier,
-    earned: earnedBadges.includes(id),
-  }))
+  // Memoized so HomePage re-renders don't hand BadgeMedalGrid a fresh array
+  // each time (which would otherwise tear down and rebuild the WebGL scene).
+  const badgeItems = useMemo(
+    () =>
+      listAllBadgeIds().map((id) => ({
+        badgeId: id,
+        tier: badgeMeta(id).tier,
+        earned: earnedBadges.includes(id),
+      })),
+    [earnedBadges],
+  )
   const earnedCount = badgeItems.filter((i) => i.earned).length
   const totalCount = badgeItems.length
 
@@ -363,6 +368,7 @@ function HomeDashboard() {
               items={[{ badgeId: selectedBadge, tier: badgeMeta(selectedBadge).tier, earned: earnedBadges.includes(selectedBadge) }]}
               interactive={false}
               showLabels={false}
+              draggable
               onSelect={() => {}}
               className="badge-detail__medal"
             />

@@ -4,9 +4,11 @@
 
 import type { LearnerState, SkillStat } from '../storage/types'
 import { masteryTier } from '../storage/progress'
+import type { MasteryTier } from '../storage/progress'
 import { getLesson } from '../content/registry'
 import { isDue } from './leitner'
 import type { Box } from './leitner'
+import { skillLabel } from '../content/skillLabels'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 // Half-life for success-rate decay, in days. After this many days without a
@@ -115,4 +117,14 @@ export function lessonReviewQueue(state: LearnerState, lessonId: string, perSkil
     }
   }
   return queue
+}
+
+export type SkillTier = { skillId: string; label: string; tier: MasteryTier }
+
+export function belowSkilledTiers(state: LearnerState, lessonId: string): SkillTier[] {
+  return belowSkilledSkills(state, lessonId).map((skillId) => ({
+    skillId,
+    label: skillLabel(skillId),
+    tier: masteryTier(state.skillStats[skillId]),
+  }))
 }
