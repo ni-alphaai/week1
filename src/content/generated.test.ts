@@ -10,6 +10,7 @@ import {
   deriveSmallerVariantPuzzle,
   recordPracticePuzzle,
   clearPracticeSession,
+  mapMechanicsFromStep,
 } from './generated'
 
 const lesson: Lesson = {
@@ -202,5 +203,46 @@ describe('deriveSmallerVariantPuzzle', () => {
   it('returns null when the lesson has no authored play step', () => {
     const l: Lesson = { ...lesson, steps: [{ id: 'intro', type: 'concept', title: 'Hi', body: 'x' }] }
     expect(deriveSmallerVariantPuzzle(l)).toBeNull()
+  })
+
+  it('deriveSmallerVariantPuzzle keeps a mechanic-bearing step over a smaller plain step', () => {
+    // plainSmall: 1-move, no mechanic
+    const plainSmall = {
+      id: 's-plain-small',
+      type: 'sequence' as const,
+      goal: 'Short hop',
+      prompt: 'One step.',
+      map: { rows: 1, cols: 2, start: { row: 0, col: 0 }, goal: { row: 0, col: 1 } },
+      availableCommands: ['right'] as const,
+      successRule: 'reachGoal' as const,
+      solution: ['right'] as Instruction[],
+      feedback: { correct: 'Nice.', hints: [] },
+    }
+    // mechanicStep: 2-move WITH a teleport off the solution path -> mapMechanicsFromStep detects 'teleports'
+    // The teleport pair is at (0,3)/(0,4) — off the solution path [right,right] from (0,0) to (0,2)
+    const mechanicStep = {
+      id: 's-mechanic',
+      type: 'sequence' as const,
+      goal: 'Teleport run',
+      prompt: 'Two steps.',
+      map: {
+        rows: 1,
+        cols: 5,
+        start: { row: 0, col: 0 },
+        goal: { row: 0, col: 2 },
+        teleports: [{ a: { row: 0, col: 3 }, b: { row: 0, col: 4 } }],
+      },
+      availableCommands: ['right'] as const,
+      successRule: 'reachGoal' as const,
+      solution: ['right', 'right'] as Instruction[],
+      feedback: { correct: 'Done.', hints: [] },
+    }
+    const l: Lesson = {
+      ...loopLesson,
+      steps: [plainSmall, mechanicStep],
+    }
+    const variant = deriveSmallerVariantPuzzle(l)
+    expect(variant).not.toBe(null)
+    expect(mapMechanicsFromStep(variant!.map, variant!.availableActions).length).toBeGreaterThan(0)
   })
 })
