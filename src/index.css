@@ -1001,7 +1001,6 @@ body {
 
 .badge-tile:hover {
   background: var(--color-surface-strong);
-  transform: translateY(-2px);
 }
 
 .badge-tile:focus-visible {
@@ -1070,8 +1069,18 @@ div.badge-tile:hover {
   height: 4.5rem;
 }
 
-/* 3D tile: when the WebGL scene is active, hide the 2D emblem underneath */
-.badge-tile[data-medal-3d="true"] .badge-tile__emblem {
+/* 3D tile: when the WebGL scene is active, the data-medal-3d marker sits on the
+   medal slot itself. Drop the 2D gradient/shadow backing and the 2D emblem so
+   only the live 3D medallion shows through. */
+.badge-tile__medal[data-medal-3d="true"] {
+  background: none;
+  box-shadow: none;
+  border: none;
+}
+
+/* The live 3D coin renders on top, so hide every DOM child of the slot — the
+   earned emblem AND the locked LockIcon (locked badges now render as a 3D blank). */
+.badge-tile__medal[data-medal-3d="true"] > * {
   visibility: hidden;
 }
 
@@ -1080,6 +1089,73 @@ div.badge-tile:hover {
   .badge-tile:hover {
     transition: none !important;
     transform: none !important;
+  }
+}
+
+/* ── Badge hover tooltip ───────────────────────────────────────────────────────
+   Custom replacement for the native `title` tooltip (which the browser pinned to
+   the page corner near viewport edges). Rendered in a portal on document.body
+   and positioned by placeTooltip(); fixed so it floats above all stacking. */
+.badge-tooltip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 16rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 12px;
+  background: var(--color-text);
+  color: var(--color-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.22);
+  pointer-events: none;
+  text-align: left;
+}
+
+.badge-tooltip__title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.badge-tooltip__blurb {
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.3;
+  opacity: 0.85;
+}
+
+/* Caret pointing toward the anchored tile. */
+.badge-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  background: var(--color-text);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.badge-tooltip--above::after {
+  bottom: -4px;
+}
+
+.badge-tooltip--below::after {
+  top: -4px;
+}
+
+.badge-tooltip--animate {
+  animation: badge-tooltip-in 0.12s ease-out;
+}
+
+@keyframes badge-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

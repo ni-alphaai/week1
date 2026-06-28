@@ -1,8 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { badgeMeta, type BadgeTier } from '../content/badges'
 import { emblemFor } from './badgeEmblems'
 import { LockIcon } from './icons'
 import { prefersReducedMotion, supportsWebGL } from '../lib/webgl'
+import { BadgeTooltip } from './BadgeTooltip'
+import type { TooltipRect } from './tooltipPlacement'
 
 // IMPORTANT: this module must NOT statically import three.js. The three.js
 // scene controller lives in ./BadgeMedalScene and is pulled in via a dynamic
@@ -23,6 +25,8 @@ export interface BadgeMedalGridProps {
   interactive?: boolean
   /** When false, the badge title label is omitted (for the compact solo medal in the detail card). Default: true. */
   showLabels?: boolean
+  /** When true, the medal can be grabbed and spun with the pointer (single-medal detail view). Default: false. */
+  draggable?: boolean
 }
 
 /**
@@ -35,11 +39,30 @@ export interface BadgeMedalGridProps {
  * 3D medal per earned tile using viewport+scissor — never a context per tile.
  * The decorative canvas is aria-hidden; all real info stays in the DOM.
  */
-export function BadgeMedalGrid({ items, onSelect, className, interactive = true, showLabels = true }: BadgeMedalGridProps) {
+export function BadgeMedalGrid({ items, onSelect, className, interactive = true, showLabels = true, draggable = false }: BadgeMedalGridProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  // Per-tile elements, keyed by badgeId, handed to the scene for viewport/scissor.
+  // Per-tile MEDAL-SLOT elements (the circular `.badge-tile__medal` span, not
+  // the whole button), keyed by badgeId, handed to the scene for viewport/scissor.
   const tileRefs = useRef<Map<string, HTMLElement>>(new Map())
+  // The tile currently hovered/focused, with its viewport rect, drives the
+  // custom tooltip. Replaces the native `title` attribute, which the browser
+  // pinned to the page corner near viewport edges.
+  const [hovered, setHovered] = useState<{ badgeId: string; rect: TooltipRect } | null>(null)
+  const tooltipIdBase = useId()
+
+  function showTooltip(badgeId: string, el: HTMLElement) {
+    const r = el.getBoundingClientRect()
+    setHovered({ badgeId, rect: { top: r.top, left: r.left, width: r.width, height: r.height } })
+  }
+  function hideTooltip(badgeId: string) {
+    setHovered((cur) => (cur && cur.badgeId === badgeId ? null : cur))
+  }
+
+  // Content signature so a referentially-new but content-equal `items` array
+  // doesn't tear down and rebuild the WebGL context every render (which would
+  // exhaust the browser's context cap and blank the medals).
+  const signature = items.map((it) => `${it.badgeId}:${it.tier}:${it.earned ? 1 : 0}`).join('|')
 
   useEffect(() => {
     if (!supportsWebGL() || prefersReducedMotion()) return
@@ -50,15 +73,14 @@ export function BadgeMedalGrid({ items, onSelect, className, interactive = true,
     let controller: BadgeMedalSceneController | null = null
     let cancelled = false
 
-    // The set of tiles to render medals on (earned only); locked tiles keep
-    // their DOM LockIcon and are skipped by the scene.
-    const earned = items.filter((it) => it.earned)
-    const tiles = earned
+    // All tiles get a 3D medallion: earned coins show their struck emblem,
+    // locked ones render as a dim matte blank. The scene reads the `earned` flag.
+    const tiles = items
       .map((it) => {
         const el = tileRefs.current.get(it.badgeId)
-        return el ? { badgeId: it.badgeId, tier: it.tier, element: el } : null
+        return el ? { badgeId: it.badgeId, tier: it.tier, earned: it.earned, element: el } : null
       })
-      .filter((t): t is { badgeId: string; tier: BadgeTier; element: HTMLElement } => t !== null)
+      .filter((t): t is { badgeId: string; tier: BadgeTier; earned: boolean; element: HTMLElement } => t !== null)
 
     if (tiles.length === 0) return
 
@@ -70,7 +92,7 @@ export function BadgeMedalGrid({ items, onSelect, className, interactive = true,
     import('./BadgeMedalScene')
       .then(({ createBadgeMedalScene }) => {
         if (cancelled) return
-        controller = createBadgeMedalScene({ canvas, container, tiles })
+        controller = createBadgeMedalScene({ canvas, container, tiles, draggable })
       })
       .catch(() => {
         // Fail closed: the 2D emblems already show. Undo the hide marker.
@@ -83,7 +105,10 @@ export function BadgeMedalGrid({ items, onSelect, className, interactive = true,
       controller = null
       for (const t of tiles) t.element?.removeAttribute('data-medal-3d')
     }
-  }, [items])
+    // `items` is read inside but is kept stable via `signature`; re-running only
+    // when the badge content actually changes is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature, draggable])
 
   return (
     <div ref={containerRef} className={`badge-medal-grid${className ? ` ${className}` : ''}`} style={{ position: 'relative' }}>
@@ -92,7 +117,17 @@ export function BadgeMedalGrid({ items, onSelect, className, interactive = true,
         ref={canvasRef}
         aria-hidden="true"
         className="badge-medal-grid__canvas"
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          // Draggable (detail) medal captures the pointer to spin; the grid lets
+          // clicks fall through to the tile buttons underneath.
+          pointerEvents: draggable ? 'auto' : 'none',
+          cursor: draggable ? 'grab' : undefined,
+          touchAction: draggable ? 'none' : undefined,
+        }}
       />
       {items.map((item) => {
         const meta = badgeMeta(item.badgeId)
@@ -103,7 +138,13 @@ export function BadgeMedalGrid({ items, onSelect, className, interactive = true,
         ].join(' ')
         const tileContent = (
           <>
-            <span className="badge-tile__medal">
+            <span
+              className="badge-tile__medal"
+              ref={(el) => {
+                if (el) tileRefs.current.set(item.badgeId, el)
+                else tileRefs.current.delete(item.badgeId)
+              }}
+            >
               {item.earned ? (
                 <span className="badge-tile__emblem">{emblemFor(item.badgeId, 'h-7 w-7')}</span>
               ) : (
@@ -115,35 +156,40 @@ export function BadgeMedalGrid({ items, onSelect, className, interactive = true,
         )
         if (!interactive) {
           return (
-            <div
-              key={item.badgeId}
-              ref={(el) => {
-                if (el) tileRefs.current.set(item.badgeId, el)
-                else tileRefs.current.delete(item.badgeId)
-              }}
-              className={tileClass}
-              title={meta.blurb || undefined}
-            >
+            <div key={item.badgeId} className={tileClass}>
               {tileContent}
             </div>
           )
         }
+        const isHovered = hovered?.badgeId === item.badgeId
         return (
           <button
             key={item.badgeId}
             type="button"
-            ref={(el) => {
-              if (el) tileRefs.current.set(item.badgeId, el)
-              else tileRefs.current.delete(item.badgeId)
-            }}
             onClick={() => onSelect(item.badgeId)}
             className={tileClass}
-            title={meta.blurb || undefined}
+            aria-describedby={isHovered ? `${tooltipIdBase}-${item.badgeId}` : undefined}
+            onPointerEnter={(e) => showTooltip(item.badgeId, e.currentTarget)}
+            onPointerLeave={() => hideTooltip(item.badgeId)}
+            onFocus={(e) => showTooltip(item.badgeId, e.currentTarget)}
+            onBlur={() => hideTooltip(item.badgeId)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') hideTooltip(item.badgeId)
+            }}
           >
             {tileContent}
           </button>
         )
       })}
+      {hovered && (
+        <BadgeTooltip
+          id={`${tooltipIdBase}-${hovered.badgeId}`}
+          title={badgeMeta(hovered.badgeId).title}
+          blurb={badgeMeta(hovered.badgeId).blurb}
+          anchorRect={hovered.rect}
+          reducedMotion={prefersReducedMotion()}
+        />
+      )}
     </div>
   )
 }
