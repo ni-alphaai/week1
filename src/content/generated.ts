@@ -81,7 +81,7 @@ function puzzleToExemplar(puzzle: GeneratedPuzzle): object {
   return exemplar
 }
 
-function mapMechanicsFromStep(map: MapConfig, actions: Action[] | undefined): string[] {
+export function mapMechanicsFromStep(map: MapConfig, actions: Action[] | undefined): string[] {
   const found: string[] = []
   if (map.teleports?.length) found.push('teleports')
   if (map.tasks?.length) found.push('tasks')
