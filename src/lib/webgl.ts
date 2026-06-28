@@ -30,3 +30,18 @@ export function supportsWebGL(): boolean {
     return false
   }
 }
+
+/**
+ * Device-pixel-ratio for the badge medal canvas.
+ *
+ * The grid renders many coins into one shared canvas, so it stays capped at 2 (a
+ * deliberate perf guard). The single-coin detail view (`draggable`) can afford to
+ * supersample: rendering above the display resolution integrates several lighting
+ * samples per pixel, which smooths both the silhouette and the specular crawl on
+ * the reeded edge / struck emblem without flattening the premium finish. Capped at
+ * 3 to keep the drawing buffer bounded.
+ */
+export function medalPixelRatio(deviceRatio: number, draggable: boolean): number {
+  const base = Math.min(deviceRatio || 1, 2)
+  return draggable ? Math.min(base * 2, 3) : base
+}

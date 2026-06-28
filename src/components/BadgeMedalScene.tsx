@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { BadgeTier } from '../content/badges'
 import { emblemFor } from './badgeEmblems'
 import { setupRenderer, makeStudioEnvironment } from './threeEnv'
+import { medalPixelRatio } from '../lib/webgl'
 
 // This is the ONLY module in the medal-grid feature that imports three.js. It
 // is reached exclusively through the dynamic import() in BadgeMedalGrid, so
@@ -433,7 +434,9 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
     // Fail closed — caller keeps the DOM 2D emblems.
     return { dispose() {} }
   }
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+  // Grid stays at the ≤2 perf cap; the single detail coin supersamples for crisp
+  // edges + no specular crawl (see medalPixelRatio).
+  renderer.setPixelRatio(medalPixelRatio(window.devicePixelRatio, draggable))
   setupRenderer(renderer)
   renderer.setScissorTest(true)
 
