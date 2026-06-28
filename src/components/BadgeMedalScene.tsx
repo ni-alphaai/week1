@@ -86,7 +86,7 @@ const RIBBON_COLOR: Record<BadgeTier, number> = {
 const TIER_RIM: Record<BadgeTier, number> = {
   silver: 0xeef4ff,
   gold: 0xffe9ac,
-  diamond: 0xffffff, // unused — diamond is the gem material, not enhanced metal
+  diamond: 0xeaf4ff, // icy cool-white sheen for the platinum holo coin
 }
 
 // Locked finish: a dark blued-steel coin that still takes the struck emblem in
@@ -107,30 +107,42 @@ const TIER_RIM_LIGHT: Record<BadgeTier, number> = {
 }
 const LOCKED_RIM_LIGHT = 0x6f8bb0
 
-// Diamond is a dielectric gem, not a metal. Toned down from the earlier
-// "glowing bulb": no emissive self-glow, default reflectivity, and a calmer
-// environment intensity, so it reads as cool clear ice catching light. The
-// colour punch now comes from the WHOLE-FACE holographic shimmer — a wide
-// iridescence (thin-film) band whose hue sweeps the full spectrum as the coin
-// rotates. Shared by the coin-body material and the engraved face material so
-// the trophy tier looks identical whether or not its heightfield has loaded.
+// Bright platinum base for the diamond coin. The CS2 holo coin (the reference)
+// is POLISHED METAL with a faint pastel oil-slick sheen — not a rainbow sticker.
+// So the diamond tier is a metal coin (like silver/gold, which already read
+// great), just struck in a cool near-white platinum so the thin-film pastels
+// have a bright, neutral specular to tint without a base hue fighting them.
+const DIAMOND_BASE = 0xe8eef5
+
+// Diamond = polished platinum + a REAL thin-film iridescence layer (three.js
+// `iridescence`), the physical oil-slick-on-chrome effect. iridescence tints the
+// metal's specular/Fresnel reflection like a soap bubble, so it reads as a subtle
+// pastel sheen that shifts as the coin rotates — desaturated and reflection-
+// driven, matching the CS2 reference, not the saturated emissive stripes the
+// earlier foil hack produced. Kept metallic (metalness 1, envMapIntensity 1.2)
+// like the other tiers so there are bright reflections for the film to colour;
+// iridescenceIOR is held near the default 1.3 (pastel, not neon) and the
+// thickness band is moderate so only a few gentle hues sweep the face. A cool
+// Fresnel rim is added via enhanceMetalMaterial (as for silver/gold). Shared by
+// the coin-body material and the engraved face so the trophy tier looks identical
+// whether or not its heightfield has loaded.
 const DIAMOND_GEM = {
-  color: TIER_COLOR.diamond,
-  metalness: 0.1,
+  color: DIAMOND_BASE,
+  metalness: 1,
   roughness: TIER_ROUGHNESS.diamond,
   clearcoat: 1,
   clearcoatRoughness: 0.06,
-  envMapIntensity: 1,
-  ior: 2.2,
-  reflectivity: 0.5,
+  envMapIntensity: 1.2,
+  anisotropy: 0.25,
   iridescence: 1,
-  iridescenceIOR: 1.6,
-  // Wider thin-film band → the rainbow sweeps a fuller spectrum as the coin
-  // rotates (closer to the CS2 holo-coin reference). Tunable during the visual
-  // check: narrow toward [100, 800] for a subtler sweep, widen for more bands.
-  iridescenceThicknessRange: [100, 1000] as [number, number],
+  // Near the 1.3 default → gentle pastel shift (the CS2 sheen), well below the
+  // 2.333 max that oversaturates into hard rainbow. Tunable in the visual check.
+  iridescenceIOR: 1.35,
+  // Moderate band → a few soft hues sweep the face as it rotates; narrow toward
+  // [100, 400] (the three.js default) for an even subtler sheen, widen for more.
+  iridescenceThicknessRange: [220, 560] as [number, number],
   emissive: new THREE.Color(TIER_EMISSIVE.diamond),
-  emissiveIntensity: 0,
+  emissiveIntensity: 0.1,
 } as const
 
 function clamp(x: number, lo: number, hi: number): number {
@@ -413,8 +425,79 @@ function enhanceMetalMaterial(
   }
 }
 
+// ── Diamond holographic sheen + Fresnel rim (onBeforeCompile) ──────────────────
+// Real PBR `iridescence` on bright metal is too subtle to read on a near-flat
+// coin — it washes into the silver. So on top of the metallic base we inject a
+// gentle holographic tint, the CS2 oil-slick look, kept SOFT: a full-spectrum hue
+// swept across the face by screen position + view angle, but (a) desaturated
+// toward white (uHoloSat) so it's a pastel sheen not a neon rainbow, and (b) at
+// low strength (uHoloStrength) so it tints rather than glares. The earlier hack
+// used full saturation at >2× this strength on a dark base — that read as hard
+// cartoon stripes; this reads as a coloured shimmer on chrome. A material gets
+// only ONE onBeforeCompile, so the cool Fresnel rim (same term as the metal
+// tiers) is folded into the same injection. hue→rgb is the branch-free triangle
+// wave. Uniforms are static, so both diamond instances share one program.
+function enhanceDiamondHolo(
+  mat: THREE.MeshPhysicalMaterial,
+  rimColor: number,
+  rimStrength: number,
+  fresnelPower: number,
+  holoStrength: number,
+  holoFreq: number,
+  holoSat: number,
+): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uRimColor = { value: new THREE.Color(rimColor) }
+    shader.uniforms.uRimStrength = { value: rimStrength }
+    shader.uniforms.uFresnelPower = { value: fresnelPower }
+    shader.uniforms.uHoloStrength = { value: holoStrength }
+    shader.uniforms.uHoloFreq = { value: holoFreq }
+    shader.uniforms.uHoloSat = { value: holoSat }
+    shader.fragmentShader =
+      'uniform vec3 uRimColor;\nuniform float uRimStrength;\nuniform float uFresnelPower;\n' +
+      'uniform float uHoloStrength;\nuniform float uHoloFreq;\nuniform float uHoloSat;\n' +
+      shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        {
+          vec3 vDir = normalize( vViewPosition );
+          float fres = pow( 1.0 - clamp( dot( vDir, normal ), 0.0, 1.0 ), uFresnelPower );
+          totalEmissiveRadiance += uRimColor * ( fres * uRimStrength );
+          float hfres = pow( 1.0 - clamp( dot( vDir, normal ), 0.0, 1.0 ), 2.0 );
+          float hue = fract(
+            ( vViewPosition.x + vViewPosition.y ) * uHoloFreq
+            + dot( normal.xy, vec2( 0.5, -0.5 ) )
+            + hfres * 0.5
+          );
+          vec3 holo = clamp( abs( mod( hue * 6.0 + vec3( 0.0, 4.0, 2.0 ), 6.0 ) - 3.0 ) - 1.0, 0.0, 1.0 );
+          holo = mix( vec3( 1.0 ), holo, uHoloSat );
+          totalEmissiveRadiance += holo * ( uHoloStrength * ( 0.45 + 0.55 * hfres ) );
+        }`,
+      )
+  }
+}
+
+// Diamond holo tuning — soft pastel sheen. Tunable in the visual check:
+// uHoloStrength up → bolder colour; uHoloSat up (toward 1) → more saturated/
+// "harder"; uHoloFreq up → more/narrower bands across the face.
+const DIAMOND_HOLO = { strength: 0.38, freq: 1.3, sat: 0.62 } as const
+
 function makeTierMaterial(tier: BadgeTier): THREE.MeshPhysicalMaterial {
-  if (tier === 'diamond') return new THREE.MeshPhysicalMaterial({ ...DIAMOND_GEM })
+  if (tier === 'diamond') {
+    // Polished platinum + real thin-film iridescence (set in DIAMOND_GEM), plus a
+    // soft pastel holographic sheen and the cool Fresnel rim the metal tiers get.
+    const gem = new THREE.MeshPhysicalMaterial({ ...DIAMOND_GEM })
+    enhanceDiamondHolo(
+      gem,
+      TIER_RIM.diamond,
+      0.4,
+      3.5,
+      DIAMOND_HOLO.strength,
+      DIAMOND_HOLO.freq,
+      DIAMOND_HOLO.sat,
+    )
+    return gem
+  }
   const mat = new THREE.MeshPhysicalMaterial({
     color: TIER_COLOR[tier],
     metalness: 1,
@@ -560,13 +643,23 @@ export function createBadgeMedalScene(params: BadgeMedalSceneParams): BadgeMedal
         lockedFaceMaterials.set(tile.badgeId, lm)
         return
       }
-      // The engraved face shares each tier's finish — the holographic gem for
-      // diamond, struck metal otherwise — and strikes the emblem + framing via
+      // The engraved face shares each tier's finish — the holographic platinum
+      // for diamond, struck metal otherwise — and strikes the emblem + framing via
       // the bump heightfield. No color/ORM maps: the metal tiers are clean struck
-      // metal and the diamond is a full-face holo gem (DIAMOND_GEM's iridescence).
+      // metal and the diamond is polished platinum with real thin-film iridescence
+      // (DIAMOND_GEM + the same cool Fresnel rim the coin body gets).
       let fm: THREE.MeshPhysicalMaterial
       if (tile.tier === 'diamond') {
         fm = new THREE.MeshPhysicalMaterial({ ...DIAMOND_GEM, bumpMap: tex, bumpScale: 6 })
+        enhanceDiamondHolo(
+          fm,
+          TIER_RIM.diamond,
+          0.4,
+          3.5,
+          DIAMOND_HOLO.strength,
+          DIAMOND_HOLO.freq,
+          DIAMOND_HOLO.sat,
+        )
       } else {
         fm = new THREE.MeshPhysicalMaterial({
           color: TIER_COLOR[tile.tier],
