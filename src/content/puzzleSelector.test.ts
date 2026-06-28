@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { rankPuzzles, MECHANIC_BONUS, selectPuzzle } from './puzzleSelector'
+import { rankPuzzles, MECHANIC_BONUS, selectPuzzle, authoredPracticeFloor } from './puzzleSelector'
+import { listLessons } from './registry'
 
 describe('rankPuzzles', () => {
   it('returns null for an empty candidate list', () => {
@@ -105,3 +106,12 @@ describe('selectPuzzle (real authored content)', () => {
   })
 })
 
+describe('authoredPracticeFloor', () => {
+  it('returns a runnable sequence practice step for every lesson (AI-off floor)', () => {
+    for (const lesson of listLessons()) {
+      const step = authoredPracticeFloor(lesson, 4)
+      expect(step, `lesson ${lesson.id} must have an authored floor`).not.toBe(null)
+      expect(step!.type).toBe('sequence')
+    }
+  })
+})

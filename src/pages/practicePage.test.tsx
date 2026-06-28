@@ -68,6 +68,9 @@ vi.mock('../content/generated', () => ({
   buildPracticeTemplate: () => (holder.concept ? { concept: holder.concept } : null),
   clearPracticeSession: vi.fn(),
   recordPracticePuzzle: vi.fn(),
+  mapMechanicsFromStep: () => [],
+  authoredStepToPuzzle: vi.fn(),
+  authoredPracticeStep: vi.fn(),
 }))
 vi.mock('../content/registry', () => ({
   getLesson: () => ({

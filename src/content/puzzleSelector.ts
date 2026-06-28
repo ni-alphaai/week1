@@ -5,7 +5,7 @@ import type { SequenceStep, ConditionalStep, Lesson } from '../types'
 import { isSequenceStep, isConditionalStep } from '../types'
 import { listLessons } from './registry'
 import { scoreFor } from '../engine/difficulty'
-import { mapMechanicsFromStep } from './generated'
+import { mapMechanicsFromStep, authoredPracticeStep } from './generated'
 
 export const MECHANIC_BONUS = 0.75
 
@@ -123,6 +123,28 @@ export function selectPuzzle(opts: SelectOpts): SelectedPuzzle | null {
   }
 }
 
-// authoredPracticeFloor is added in Task 6 — same file.
-// Lesson type is imported for use in authoredPracticeFloor.
-export type { Lesson }
+/**
+ * AI-off authored practice base. Iterates the lesson's skills (fall-through) so
+ * a conditionals-only lesson still resolves a runnable SEQUENCE practice step
+ * via its planning/loops skill. Returns null only if no skill yields a runnable
+ * sequence step (should not happen for authored lessons).
+ */
+export function authoredPracticeFloor(
+  lesson: Lesson,
+  targetDifficulty: number,
+  exclude?: ReadonlySet<string>,
+): SequenceStep | null {
+  for (const skillId of lesson.skillIds) {
+    const selected = selectPuzzle({
+      skillId,
+      targetDifficulty,
+      kind: 'sequence',
+      preferMechanics: true,
+      exclude,
+    })
+    if (!selected) continue
+    const step = authoredPracticeStep(selected.step, lesson)
+    if (step) return step
+  }
+  return null
+}
