@@ -123,8 +123,11 @@ export function BadgeMedalGrid({ items, onSelect, className, interactive = true,
           width: '100%',
           height: '100%',
           // Draggable (detail) medal captures the pointer to spin; the grid lets
-          // clicks fall through to the tile buttons underneath.
+          // clicks fall through to the tile buttons underneath. The detail canvas
+          // also needs a z-index: the medal slot is position:relative, so without
+          // one it paints over the coin face and swallows the grab.
           pointerEvents: draggable ? 'auto' : 'none',
+          zIndex: draggable ? 1 : undefined,
           cursor: draggable ? 'grab' : undefined,
           touchAction: draggable ? 'none' : undefined,
         }}

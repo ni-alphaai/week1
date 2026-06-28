@@ -8,9 +8,9 @@ import { badgeMeta } from '../content/badges'
 // onSelect, locked treatment) — intentionally the only path covered here.
 
 const items = [
-  { badgeId: 'first-loop', tier: 'bronze' as const, earned: true },
-  { badgeId: 'first-while', tier: 'silver' as const, earned: true },
-  { badgeId: 'optimal-solver', tier: 'gold' as const, earned: false },
+  { badgeId: 'first-loop', tier: 'silver' as const, earned: true },
+  { badgeId: 'first-while', tier: 'gold' as const, earned: true },
+  { badgeId: 'optimal-solver', tier: 'diamond' as const, earned: false },
 ]
 
 afterEach(() => {
@@ -39,13 +39,13 @@ describe('BadgeMedalGrid (DOM-first)', () => {
   it('applies the tier hook class per tile', () => {
     render(<BadgeMedalGrid items={items} onSelect={() => {}} />)
     const tiles = screen.getAllByRole('button')
-    expect(tiles[0].className).toContain('badge-tier--bronze')
-    expect(tiles[1].className).toContain('badge-tier--silver')
-    expect(tiles[2].className).toContain('badge-tier--gold')
+    expect(tiles[0].className).toContain('badge-tier--silver')
+    expect(tiles[1].className).toContain('badge-tier--gold')
+    expect(tiles[2].className).toContain('badge-tier--diamond')
   })
 
   it('renders the lock treatment (not the emblem) for a locked item', () => {
-    render(<BadgeMedalGrid items={[{ badgeId: 'optimal-solver', tier: 'gold', earned: false }]} onSelect={() => {}} />)
+    render(<BadgeMedalGrid items={[{ badgeId: 'optimal-solver', tier: 'diamond', earned: false }]} onSelect={() => {}} />)
     const tile = screen.getByRole('button')
     expect(tile.className).toContain('badge-tile--locked')
     // Still has an svg (the LockIcon) but no earned-emblem marker.
@@ -86,6 +86,23 @@ describe('BadgeMedalGrid (DOM-first)', () => {
     const canvas = container.querySelector('canvas')
     expect(canvas).toBeInTheDocument()
     expect(canvas).toHaveAttribute('aria-hidden', 'true')
+  })
+
+  it('draggable: canvas is lifted above the medal slot and captures the pointer', () => {
+    const { container } = render(
+      <BadgeMedalGrid items={[items[0]]} onSelect={() => {}} interactive={false} showLabels={false} draggable />,
+    )
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement
+    expect(canvas).toBeInTheDocument()
+    expect(canvas.style.zIndex).toBe('1')
+    expect(canvas.style.pointerEvents).toBe('auto')
+  })
+
+  it('non-draggable (grid): canvas does not set z-index and lets clicks fall through', () => {
+    const { container } = render(<BadgeMedalGrid items={items} onSelect={() => {}} />)
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement
+    expect(canvas.style.zIndex).toBe('')
+    expect(canvas.style.pointerEvents).toBe('none')
   })
 
   it('does not throw when WebGL is absent (the jsdom case)', () => {
