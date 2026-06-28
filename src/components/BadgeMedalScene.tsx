@@ -125,7 +125,10 @@ const DIAMOND_GEM = {
   reflectivity: 0.5,
   iridescence: 1,
   iridescenceIOR: 1.6,
-  iridescenceThicknessRange: [100, 800] as [number, number],
+  // Wider thin-film band → the rainbow sweeps a fuller spectrum as the coin
+  // rotates (closer to the CS2 holo-coin reference). Tunable during the visual
+  // check: narrow toward [100, 800] for a subtler sweep, widen for more bands.
+  iridescenceThicknessRange: [100, 1000] as [number, number],
   emissive: new THREE.Color(TIER_EMISSIVE.diamond),
   emissiveIntensity: 0,
 } as const
